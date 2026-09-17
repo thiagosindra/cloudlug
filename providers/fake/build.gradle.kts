@@ -10,7 +10,10 @@ dependencies {
     api(project(":core:hashing"))
     api(libs.kotlinx.coroutines.core)
     api(libs.kotlinx.coroutines.test)
-    api(kotlin("test"))
+    // The contract suite ships in the main source set so every adapter module
+    // can run it, which means the test framework is an api dependency here.
+    api(kotlin("test-junit5"))
+    api(libs.junit.jupiter)
 
     testImplementation(libs.kotlinx.coroutines.test)
 }

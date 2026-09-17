@@ -1,11 +1,15 @@
 package dev.thiagosindra.cloudlug.database
 
 import dev.thiagosindra.cloudlug.database.dao.CloudLugDatabase
+import dev.thiagosindra.cloudlug.database.entity.CacheChunkEntity
 import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.database.entity.TransferItemEntity
+import dev.thiagosindra.cloudlug.database.state.CacheChunkStateMachine
 import dev.thiagosindra.cloudlug.database.state.TransferItemStateMachine
 import dev.thiagosindra.cloudlug.database.state.TransferStateMachine
 import dev.thiagosindra.cloudlug.model.AccountId
+import dev.thiagosindra.cloudlug.model.CacheChunkId
+import dev.thiagosindra.cloudlug.model.CacheChunkStatus
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.ProviderHash
@@ -273,6 +277,48 @@ class TransferRepository(
             }
         }
         moved
+    }
+
+    // ------------------------------------------------------------------- chunks
+
+    /**
+     * Records a cached byte range (spec §12.3). The row exists only once the
+     * bytes are on disk, so a crash can never leave the database claiming a
+     * chunk that was never written.
+     */
+    suspend fun insertCacheChunk(chunk: CacheChunkEntity): CacheChunkEntity = database.withTransaction {
+        database.chunks.insert(chunk)
+        chunk
+    }
+
+    /** Moves a chunk along the §15.3 lifecycle, rejecting illegal transitions. */
+    suspend fun transitionCacheChunk(id: CacheChunkId, to: CacheChunkStatus): CacheChunkEntity =
+        database.withTransaction {
+            val chunk = database.chunks.findById(id) ?: error("No cache chunk $id")
+            CacheChunkStateMachine.require(chunk.status, to)
+            val updated = chunk.copy(status = to)
+            database.chunks.update(updated)
+            updated
+        }
+
+    /**
+     * Drops a chunk row once its bytes are gone. Callers delete the file first
+     * and must have established that the chunk is no longer needed for recovery
+     * (spec §32.4) — [CacheChunkStateMachine.isSafeToDelete] is that check.
+     */
+    suspend fun deleteCacheChunk(id: CacheChunkId) = database.withTransaction {
+        database.chunks.delete(id)
+    }
+
+    suspend fun listCacheChunks(itemId: TransferItemId): List<CacheChunkEntity> =
+        database.chunks.listByItem(itemId)
+
+    /** Bytes the cache currently holds, for the §15 budget. */
+    suspend fun totalCachedBytes(): Long = database.chunks.totalCachedBytes()
+
+    /** Forgets every chunk of a transfer, for cleanup after cancellation (spec §22.3). */
+    suspend fun deleteCacheChunksOfTransfer(transferId: TransferId) = database.withTransaction {
+        database.chunks.deleteByTransfer(transferId)
     }
 
     // ------------------------------------------------------------------ helpers
