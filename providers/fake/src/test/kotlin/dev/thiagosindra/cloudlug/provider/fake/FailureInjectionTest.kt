@@ -177,8 +177,10 @@ class FailureInjectionTest {
         val id = provider.storage.file("data.bin", byteArrayOf(1))
         provider.interruptProcess()
 
-        assertFailsWith<CloudException> { provider.resolveMetadata(account, id) }
-        assertFailsWith<CloudException> { provider.quota(account) }
+        // Not a CloudException: the process dying is not a provider error the
+        // retry policy should reason about (spec §31.4 vs §23).
+        assertFailsWith<ProcessInterruptedException> { provider.resolveMetadata(account, id) }
+        assertFailsWith<ProcessInterruptedException> { provider.quota(account) }
 
         provider.clearInjections()
         assertEquals(1L, provider.resolveMetadata(account, id).size)

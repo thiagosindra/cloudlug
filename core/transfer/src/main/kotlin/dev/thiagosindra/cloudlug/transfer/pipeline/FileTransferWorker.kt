@@ -10,6 +10,7 @@ import dev.thiagosindra.cloudlug.hashing.DualHashPipeline
 import dev.thiagosindra.cloudlug.model.CacheChunkId
 import dev.thiagosindra.cloudlug.model.CacheChunkStatus
 import dev.thiagosindra.cloudlug.model.CloudObjectType
+import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.TransferItemStatus
 import dev.thiagosindra.cloudlug.provider.CloudDownload
@@ -105,9 +106,14 @@ class FileTransferWorker(
         destinationParentId: CloudObjectId,
     ): TransferItemEntity {
         repository.transitionItem(item.id, TransferItemStatus.CHECKING_DESTINATION)
-        val path = item.destinationRelativePath ?: item.sourceRelativePath
+        // The parent chain already exists; this creates the one folder named by
+        // the item, not its whole path, which would nest the tree twice.
         val folder = retries.execute(item.id, "prepareDestination") {
-            destination.prepareDestination(transfer.destinationAccountId, destinationParentId, path)
+            destination.prepareDestination(
+                transfer.destinationAccountId,
+                destinationParentId,
+                CloudPath.of(item.filename),
+            )
         }
         // A folder carries no bytes, so there is nothing to verify beyond its
         // existence; it goes straight to its terminal state.

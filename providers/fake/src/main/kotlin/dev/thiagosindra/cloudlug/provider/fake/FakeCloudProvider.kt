@@ -26,6 +26,14 @@ import kotlinx.coroutines.flow.flow
 import java.time.Instant
 
 /**
+ * Thrown when [FakeCloudProvider.interruptProcess] simulates the app being
+ * killed (spec §31.4). Deliberately not a [CloudException]: the process dying
+ * is not something the retry policy should reason about, and the engine must
+ * recover from it through the database, not through a catch block.
+ */
+class ProcessInterruptedException(message: String) : RuntimeException(message)
+
+/**
  * An in-memory [CloudProvider] with programmable failures (spec §31.3).
  *
  * Built before any real adapter, on purpose: it is what lets the engine's
@@ -64,7 +72,12 @@ class FakeCloudProvider(
         interrupted = false
     }
 
-    /** Simulates the process dying: every later call fails until [clearInjections]. */
+    /**
+     * Simulates the *process* dying rather than a network error: calls fail
+     * with [ProcessInterruptedException], which is not a [CloudException] and
+     * so is not retried or turned into an item failure. That is what makes the
+     * §31.4 crash-recovery scenarios distinguishable from §23 retry scenarios.
+     */
     fun interruptProcess() {
         interrupted = true
     }
@@ -245,9 +258,7 @@ class FakeCloudProvider(
 
     private fun record(operation: FailureInjection.Operation) {
         calls += operation.name
-        if (interrupted) {
-            throw CloudException(CloudErrorKind.TRANSIENT_NETWORK, "process interrupted", code = "interrupted")
-        }
+        if (interrupted) throw ProcessInterruptedException("process interrupted before $operation")
         failIfInjected(operation)
     }
 
@@ -259,7 +270,10 @@ class FakeCloudProvider(
                 (it.onOperation == operation || it.onOperation == FailureInjection.Operation.ANY)
         } ?: return
         injection.times--
-        if (injection.fault == FailureInjection.Fault.PROCESS_INTERRUPTED) interrupted = true
+        if (injection.fault == FailureInjection.Fault.PROCESS_INTERRUPTED) {
+            interrupted = true
+            throw ProcessInterruptedException("process interrupted during $operation")
+        }
         throw injection.toException()
     }
 

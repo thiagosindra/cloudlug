@@ -102,13 +102,8 @@ data class FailureInjection(
             code = "insufficient_space",
         )
 
-        Fault.PROCESS_INTERRUPTED -> CloudException(
-            CloudErrorKind.TRANSIENT_NETWORK,
-            "process interrupted",
-            code = "interrupted",
-        )
-
         Fault.NOT_FOUND -> CloudException(CloudErrorKind.NOT_FOUND, "404 Not Found", code = "404")
         Fault.CORRUPT_CHUNK -> error("CORRUPT_CHUNK alters bytes rather than throwing")
+        Fault.PROCESS_INTERRUPTED -> error("PROCESS_INTERRUPTED raises ProcessInterruptedException")
     }
 }
