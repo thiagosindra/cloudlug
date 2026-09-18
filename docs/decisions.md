@@ -624,3 +624,11 @@ proves the process survives construction; only driving the actual user journey
 proves the journey exists. `docs/status.md` said in as many words that the
 wizard had never been driven end to end, and that is exactly where the defect
 was.
+
+**What now covers it.** `NewTransferJourneyTest` drives the wizard from the home
+screen to a started transfer, clicking real rows and reading real text rather
+than reaching for the ViewModel — the defect lived in what the screen was given
+to draw, so a test that bypassed the screen would have missed it. The picker
+rows became clickable in the same change: a 24dp checkbox beside a full-width
+row is the wrong thing to aim at on a phone, and it was also the only thing a
+test could aim at.

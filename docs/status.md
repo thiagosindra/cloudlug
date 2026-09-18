@@ -75,15 +75,22 @@ first version of this assertion failed against a perfectly healthy app.
 three-argument signature appears in no dex. `DebugCrashReporter` is in the debug
 APK and absent from release.
 
-**Still not verified, and it cost a release.** v0.2.1 shipped a wizard whose
-picker was empty on a device (ADR-0026) while every check above was green: the
-smoke test proved the app starts, not that it works. The contract suite now
-covers `listChildren` at the account root, but no test drives the wizard from
-step 1 to a started transfer, which is the gap that would have caught it
-directly.
+**Written, not yet run anywhere.** `NewTransferJourneyTest` drives the §24.2
+wizard the way a person does — home screen, both accounts, pick `photos`, pick
+`My Drive`, review, start — clicking real rows and reading real text. Every
+assertion in it would have failed on v0.2.1. It has not executed yet: it needs
+the emulator job, so until a CI run is green treat it as unexecuted code rather
+than coverage.
 
-No test asserts that anything *renders correctly*, only that composing them does
-not throw. Layout,
+**Why it exists.** v0.2.1 shipped a wizard whose picker was empty on a device
+(ADR-0026) while every check was green. `FirstRunSmokeTest` proved the app
+starts; nothing proved it works, and the difference was a transfer that could
+not be created at all.
+
+**Still not verified.** No test asserts that anything *renders correctly* —
+that text is legible, that nothing is clipped, that the §24.3 hop indicator
+reads as intended. The journey test proves the flow is reachable and the engine
+runs inside the app, not that the result looks right. Layout,
 readability and the §24.3 hop indicator have been seen by nobody. The wizard has
 never been driven end to end on a device. Everything below `:app` remains
 JVM-tested only.

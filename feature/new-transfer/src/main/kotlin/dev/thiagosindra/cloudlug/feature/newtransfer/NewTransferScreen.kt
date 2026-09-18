@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -117,6 +118,12 @@ fun NewTransferScreen(
                         }
                         items(state.sourceChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
+                                // The whole row toggles, not just the checkbox:
+                                // a 24dp target beside a full-width row is the
+                                // wrong thing to aim at on a phone.
+                                modifier = Modifier.clickable {
+                                    viewModel.toggleSourceSelection(obj.id.opaqueId)
+                                },
                                 headlineContent = { SingleLine(obj.name) },
                                 supportingContent = {
                                     Text(
@@ -145,6 +152,9 @@ fun NewTransferScreen(
                         }
                         items(state.destinationChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
+                                modifier = Modifier.clickable {
+                                    viewModel.chooseDestinationFolder(obj.id.opaqueId)
+                                },
                                 headlineContent = { SingleLine(obj.name) },
                                 leadingContent = {
                                     RadioButton(
@@ -199,6 +209,7 @@ private fun ProviderList(
         items(providers, key = { it.name }) { type ->
             val isDisabled = type in disabled
             ListItem(
+                modifier = Modifier.clickable(enabled = !isDisabled) { onSelect(type) },
                 headlineContent = { Text(providerLabel(type)) },
                 supportingContent = if (isDisabled) {
                     { Text("Already the source of this transfer", style = MaterialTheme.typography.bodySmall) }
