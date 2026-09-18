@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        google()
         mavenCentral()
         gradlePluginPortal()
     }
@@ -8,15 +9,17 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        google()
         mavenCentral()
     }
 }
 
 rootProject.name = "cloudlug"
 
-// v0.1 is JVM-only: every module below builds and tests with `./gradlew test`
-// and needs no Android SDK. The Android modules from spec §4 (:app, :core:ui,
-// feature/*) arrive in v0.2 — see docs/decisions.md ADR-0003.
+// The engine modules are pure Kotlin/JVM and test with `./gradlew test` on any
+// JDK. `:core:database` uses Room's KMP artifacts, so its Room tests run on the
+// JVM too (docs/decisions.md ADR-0021) — only the modules below it need the
+// Android SDK.
 include(
     ":core:model",
     ":core:database",
@@ -27,4 +30,13 @@ include(
     ":providers:fake",
     ":providers:dropbox",
     ":providers:google-drive",
+)
+
+// Android modules from spec §4 and the §24 screens.
+include(
+    ":app",
+    ":core:ui",
+    ":feature:home",
+    ":feature:new-transfer",
+    ":feature:transfer-details",
 )

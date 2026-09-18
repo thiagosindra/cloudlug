@@ -1,0 +1,547 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "1665e05223b9f74b7ad5c3fa32aba496",
+    "entities": [
+      {
+        "tableName": "transfers",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `sourceProvider` TEXT NOT NULL, `sourceAccountId` TEXT NOT NULL, `destinationProvider` TEXT NOT NULL, `destinationAccountId` TEXT NOT NULL, `destinationRootId` TEXT NOT NULL, `destinationContainerId` TEXT, `destinationContainerName` TEXT NOT NULL, `status` TEXT NOT NULL, `networkPolicy` TEXT NOT NULL, `enumerationCursor` TEXT, `totalFiles` INTEGER NOT NULL, `completedFiles` INTEGER NOT NULL, `duplicateFiles` INTEGER NOT NULL, `unsupportedFiles` INTEGER NOT NULL, `sourceChangedFiles` INTEGER NOT NULL, `conflictFiles` INTEGER NOT NULL, `failedFiles` INTEGER NOT NULL, `cancelledFiles` INTEGER NOT NULL, `totalBytes` INTEGER NOT NULL, `completedBytes` INTEGER NOT NULL, `unknownSizeFiles` INTEGER NOT NULL DEFAULT 0, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceProvider",
+            "columnName": "sourceProvider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceAccountId",
+            "columnName": "sourceAccountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationProvider",
+            "columnName": "destinationProvider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationAccountId",
+            "columnName": "destinationAccountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationRootId",
+            "columnName": "destinationRootId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "destinationContainerId",
+            "columnName": "destinationContainerId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "destinationContainerName",
+            "columnName": "destinationContainerName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "networkPolicy",
+            "columnName": "networkPolicy",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enumerationCursor",
+            "columnName": "enumerationCursor",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "totalFiles",
+            "columnName": "totalFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedFiles",
+            "columnName": "completedFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "duplicateFiles",
+            "columnName": "duplicateFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unsupportedFiles",
+            "columnName": "unsupportedFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceChangedFiles",
+            "columnName": "sourceChangedFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conflictFiles",
+            "columnName": "conflictFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "failedFiles",
+            "columnName": "failedFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancelledFiles",
+            "columnName": "cancelledFiles",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "totalBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedBytes",
+            "columnName": "completedBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unknownSizeFiles",
+            "columnName": "unknownSizeFiles",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "transfer_items",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `transferId` TEXT NOT NULL, `sourceObjectId` TEXT NOT NULL, `sourceRevision` TEXT, `sourceRelativePath` TEXT NOT NULL, `filename` TEXT NOT NULL, `mimeType` TEXT, `size` INTEGER, `modifiedAt` INTEGER, `objectKind` TEXT NOT NULL, `sourceProviderHash` TEXT, `computedSha256` TEXT, `computedDestinationNativeHash` TEXT, `hashCheckpoint` TEXT, `destinationParentId` TEXT, `destinationObjectId` TEXT, `destinationRelativePath` TEXT, `status` TEXT NOT NULL, `statusReason` TEXT, `downloadedBytes` INTEGER NOT NULL, `uploadedBytes` INTEGER NOT NULL, `uploadSessionId` TEXT, `uploadSessionMetadata` TEXT, `uploadSessionExpiresAt` INTEGER, `retryCount` INTEGER NOT NULL, `lastErrorCode` TEXT, `lastErrorMessage` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`transferId`) REFERENCES `transfers`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transferId",
+            "columnName": "transferId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceObjectId",
+            "columnName": "sourceObjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceRevision",
+            "columnName": "sourceRevision",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "sourceRelativePath",
+            "columnName": "sourceRelativePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "filename",
+            "columnName": "filename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mimeType",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "size",
+            "columnName": "size",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "modifiedAt",
+            "columnName": "modifiedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "objectKind",
+            "columnName": "objectKind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceProviderHash",
+            "columnName": "sourceProviderHash",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "computedSha256",
+            "columnName": "computedSha256",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "computedDestinationNativeHash",
+            "columnName": "computedDestinationNativeHash",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "hashCheckpoint",
+            "columnName": "hashCheckpoint",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "destinationParentId",
+            "columnName": "destinationParentId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "destinationObjectId",
+            "columnName": "destinationObjectId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "destinationRelativePath",
+            "columnName": "destinationRelativePath",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "statusReason",
+            "columnName": "statusReason",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "downloadedBytes",
+            "columnName": "downloadedBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadedBytes",
+            "columnName": "uploadedBytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadSessionId",
+            "columnName": "uploadSessionId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uploadSessionMetadata",
+            "columnName": "uploadSessionMetadata",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "uploadSessionExpiresAt",
+            "columnName": "uploadSessionExpiresAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "retryCount",
+            "columnName": "retryCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCode",
+            "columnName": "lastErrorCode",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "lastErrorMessage",
+            "columnName": "lastErrorMessage",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_transfer_items_transferId",
+            "unique": false,
+            "columnNames": [
+              "transferId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_items_transferId` ON `${TABLE_NAME}` (`transferId`)"
+          },
+          {
+            "name": "index_transfer_items_sourceObjectId",
+            "unique": false,
+            "columnNames": [
+              "sourceObjectId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_items_sourceObjectId` ON `${TABLE_NAME}` (`sourceObjectId`)"
+          },
+          {
+            "name": "index_transfer_items_transferId_status",
+            "unique": false,
+            "columnNames": [
+              "transferId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_transfer_items_transferId_status` ON `${TABLE_NAME}` (`transferId`, `status`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transfers",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "transferId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "cache_chunks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `transferItemId` TEXT NOT NULL, `offset` INTEGER NOT NULL, `length` INTEGER NOT NULL, `localFilename` TEXT NOT NULL, `hash` TEXT, `status` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`transferItemId`) REFERENCES `transfer_items`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transferItemId",
+            "columnName": "transferItemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "offset",
+            "columnName": "offset",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "length",
+            "columnName": "length",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localFilename",
+            "columnName": "localFilename",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hash",
+            "columnName": "hash",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cache_chunks_transferItemId",
+            "unique": false,
+            "columnNames": [
+              "transferItemId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cache_chunks_transferItemId` ON `${TABLE_NAME}` (`transferItemId`)"
+          },
+          {
+            "name": "index_cache_chunks_transferItemId_status",
+            "unique": false,
+            "columnNames": [
+              "transferItemId",
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cache_chunks_transferItemId_status` ON `${TABLE_NAME}` (`transferItemId`, `status`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "transfer_items",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "transferItemId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "accounts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `provider` TEXT NOT NULL, `providerAccountId` TEXT NOT NULL, `displayName` TEXT, `displayEmail` TEXT, `grantedScopes` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "provider",
+            "columnName": "provider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerAccountId",
+            "columnName": "providerAccountId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "displayEmail",
+            "columnName": "displayEmail",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "grantedScopes",
+            "columnName": "grantedScopes",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_accounts_provider_providerAccountId",
+            "unique": true,
+            "columnNames": [
+              "provider",
+              "providerAccountId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_accounts_provider_providerAccountId` ON `${TABLE_NAME}` (`provider`, `providerAccountId`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1665e05223b9f74b7ad5c3fa32aba496')"
+    ]
+  }
+}
