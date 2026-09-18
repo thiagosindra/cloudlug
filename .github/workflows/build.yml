@@ -136,17 +136,23 @@ jobs:
       - name: Run the smoke test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          # API 34 rather than 36: it is the oldest API level that still
-          # exercises the UIDT path §17 targets, and its system images are the
-          # best-seeded on CI. minSdk 26 coverage belongs with the §31.4
-          # recovery work in v0.5.
+          # API 34 rather than 36: it still exercises the UIDT path §17 targets
+          # and its system images are the best-seeded on CI. minSdk 26 coverage
+          # belongs with the §31.4 recovery work in v0.5.
+          #
+          # Everything else here is the action's own documented configuration,
+          # deliberately. The first attempt set `profile: pixel_6` and
+          # `ram-size: 4096M` and omitted `-no-snapshot-save`; the emulator never
+          # booted ("Timeout waiting for emulator to boot"). Those were three
+          # untested choices on a path that cannot be run locally, so this keeps
+          # to the combination the action documents and exercises.
           api-level: 34
           target: google_apis
           arch: x86_64
-          profile: pixel_6
-          ram-size: 4096M
+          force-avd-creation: false
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-boot-timeout: 900
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
 
       - name: Upload instrumentation reports
