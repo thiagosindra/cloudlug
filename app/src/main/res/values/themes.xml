@@ -1,0 +1,4 @@
+<resources>
+    <!-- Compose supplies the real theme; this is the pre-Compose window theme. -->
+    <style name="Theme.CloudLug" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

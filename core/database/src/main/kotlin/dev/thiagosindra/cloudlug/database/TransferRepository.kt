@@ -150,7 +150,7 @@ class TransferRepository(
                 updatedAt = now(),
             )
             // Items classified at manifest time are already terminal (§20.1–§20.4).
-            fresh.filter { it.status.isTerminal }.forEach { updated = updated.applyCounter(it.status, +1) }
+            fresh.filter { it.status.isTerminal }.forEach { updated = updated.applyCounter(it.status, +1, it) }
             database.transfers.update(updated.copy(enumerationCursor = cursor))
         } else {
             database.transfers.update(transfer.copy(enumerationCursor = cursor, updatedAt = now()))
@@ -409,23 +409,36 @@ class TransferRepository(
      * Applies [delta] to the counter matching [status], and to `completedBytes`
      * when an item enters or leaves COMPLETED.
      */
+    /**
+     * Moves the §12.1 outcome counters for one item.
+     *
+     * Folders are excluded, because `totalFiles` counts only non-folder items
+     * and §24.1 reports progress as "1,103 / 1,482 files". Counting a created
+     * folder as a completed file made `completedFiles` exceed `totalFiles` on
+     * any transfer with a directory in it, which drove the progress bar past
+     * 100% and let `finishTransfer` see a transfer as settled early.
+     */
     private fun TransferEntity.applyCounter(
         status: TransferItemStatus,
         delta: Int,
         item: TransferItemEntity? = null,
-    ): TransferEntity = when (status) {
-        TransferItemStatus.COMPLETED -> copy(
-            completedFiles = completedFiles + delta,
-            completedBytes = completedBytes + delta * (item?.size ?: 0L),
-        )
+    ): TransferEntity = if (item?.objectKind == CloudObjectType.FOLDER) {
+        this
+    } else {
+        when (status) {
+            TransferItemStatus.COMPLETED -> copy(
+                completedFiles = completedFiles + delta,
+                completedBytes = completedBytes + delta * (item?.size ?: 0L),
+            )
 
-        TransferItemStatus.SKIPPED_DUPLICATE -> copy(duplicateFiles = duplicateFiles + delta)
-        TransferItemStatus.SKIPPED_UNSUPPORTED -> copy(unsupportedFiles = unsupportedFiles + delta)
-        TransferItemStatus.SOURCE_CHANGED -> copy(sourceChangedFiles = sourceChangedFiles + delta)
-        TransferItemStatus.CONFLICT -> copy(conflictFiles = conflictFiles + delta)
-        TransferItemStatus.FAILED -> copy(failedFiles = failedFiles + delta)
-        TransferItemStatus.CANCELLED -> copy(cancelledFiles = cancelledFiles + delta)
+            TransferItemStatus.SKIPPED_DUPLICATE -> copy(duplicateFiles = duplicateFiles + delta)
+            TransferItemStatus.SKIPPED_UNSUPPORTED -> copy(unsupportedFiles = unsupportedFiles + delta)
+            TransferItemStatus.SOURCE_CHANGED -> copy(sourceChangedFiles = sourceChangedFiles + delta)
+            TransferItemStatus.CONFLICT -> copy(conflictFiles = conflictFiles + delta)
+            TransferItemStatus.FAILED -> copy(failedFiles = failedFiles + delta)
+            TransferItemStatus.CANCELLED -> copy(cancelledFiles = cancelledFiles + delta)
 
-        else -> this
+            else -> this
+        }
     }
 }

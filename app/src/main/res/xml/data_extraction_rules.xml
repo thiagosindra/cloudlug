@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ form of backup_rules.xml (spec §15.2). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="cloudlug-cache/" />
+        <exclude domain="file" path="credentials/" />
+        <exclude domain="sharedpref" path="credentials.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="cloudlug-cache/" />
+        <exclude domain="file" path="credentials/" />
+        <exclude domain="sharedpref" path="credentials.xml" />
+    </device-transfer>
+</data-extraction-rules>

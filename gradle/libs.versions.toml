@@ -13,6 +13,9 @@ junit = "5.11.4"
 junitPlatform = "1.11.4"
 
 agp = "8.13.2"
+# The androidx versions below are the newest that still compile against SDK 36.
+# Anything later declares a compileSdk 37 floor in its AAR metadata, which AGP
+# 8.13 refuses — see docs/decisions.md ADR-0023.
 compileSdk = "36"
 minSdk = "26"
 targetSdk = "36"
@@ -21,13 +24,13 @@ room = "2.8.5"
 # Room 2.8.5 resolves androidx.sqlite 2.6.2; the bundled driver must match so
 # the JVM tests and the Android build run the same SQLite.
 sqlite = "2.6.2"
-hilt = "2.60.1"
-hiltNavigation = "1.4.0"
-composeBom = "2026.09.00"
-activityCompose = "1.13.0"
-navigationCompose = "2.10.1"
-lifecycle = "2.9.4"
-coreKtx = "1.18.0"
+hilt = "2.57.2"
+hiltNavigation = "1.2.0"
+composeBom = "2025.06.01"
+activityCompose = "1.12.0"
+navigationCompose = "2.9.5"
+lifecycle = "2.9.1"
+coreKtx = "1.16.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }

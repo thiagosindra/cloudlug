@@ -52,6 +52,21 @@ interface CloudProvider {
         resumeAfter: CloudObjectId? = null,
     ): Flow<CloudObject>
 
+    /**
+     * One level of children under [parent], for the in-app browser §9 calls for.
+     *
+     * [enumerate] cannot serve a picker: it walks depth-first through the whole
+     * subtree, so opening an account root would enumerate everything in it
+     * before a single row could be drawn. A picker needs one level at a time,
+     * and [lookupDestination] only answers "what is called this?". Added in
+     * v0.2 when the wizard needed it — see docs/decisions.md ADR-0024.
+     *
+     * Ordering is the provider's own. Implementations page internally and emit
+     * as pages arrive, so a folder with thousands of children renders
+     * progressively.
+     */
+    fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject>
+
     /** Null when the provider does not report quota (spec §20.7). */
     suspend fun quota(account: AccountId): StorageQuota?
 

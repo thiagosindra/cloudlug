@@ -140,6 +140,13 @@ class FakeCloudProvider(
         }
     }
 
+    /** One level, in insertion order (spec §9). */
+    override fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject> = flow {
+        record(FailureInjection.Operation.ENUMERATE)
+        failIfInjected(FailureInjection.Operation.ENUMERATE)
+        storage.childrenOf(parent.opaqueId).forEach { emit(it) }
+    }
+
     override suspend fun quota(account: AccountId): StorageQuota? {
         record(FailureInjection.Operation.QUOTA)
         val total = totalQuotaBytes ?: return null

@@ -1,7 +1,9 @@
 plugins {
     id("cloudlug.jvm-module")
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.room)
+    // Versions come from buildSrc, which also puts these on the classpath for
+    // the Android convention plugins; re-declaring one here would clash.
+    id("com.google.devtools.ksp")
+    id("androidx.room")
 }
 
 // Spec §33 v0.2 and docs/decisions.md ADR-0002: Room behind the DAO interfaces.
