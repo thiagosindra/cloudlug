@@ -1,4 +1,4 @@
-# Status — v0.2.2 (wizard picker)
+# Status — v0.2.3 (journey test, ADRs ratified)
 
 What exists, what is compiled, what is verified, and what v0.3 needs from you.
 Milestone definitions are in spec §33; design decisions are in
@@ -75,17 +75,24 @@ first version of this assertion failed against a perfectly healthy app.
 three-argument signature appears in no dex. `DebugCrashReporter` is in the debug
 APK and absent from release.
 
-**Written, not yet run anywhere.** `NewTransferJourneyTest` drives the §24.2
+**Verified on an emulator, in CI.** `NewTransferJourneyTest` drives the §24.2
 wizard the way a person does — home screen, both accounts, pick `photos`, pick
-`My Drive`, review, start — clicking real rows and reading real text. Every
-assertion in it would have failed on v0.2.1. It has not executed yet: it needs
-the emulator job, so until a CI run is green treat it as unexecuted code rather
-than coverage.
+`My Drive`, review, start — clicking real rows and reading real text rather than
+reaching for the ViewModel. It then follows the app to §24.3 and asserts the
+transfer **completes with every item verified at the destination** (§21): 7
+files, 11.3 MB. That is the first time the engine has been shown running to
+completion inside the app rather than in a JVM test.
 
 **Why it exists.** v0.2.1 shipped a wizard whose picker was empty on a device
 (ADR-0026) while every check was green. `FirstRunSmokeTest` proved the app
 starts; nothing proved it works, and the difference was a transfer that could
 not be created at all.
+
+**One thing it found on the way.** `WizardStep.STARTED` and its "Transfer
+started." text can never render: `MainActivity.onStarted` navigates to the
+detail screen and pops `NEW_TRANSFER`, so the wizard is gone before that state
+could be drawn. Dead UI, left in place rather than removed in a test-fixing
+commit.
 
 **Still not verified.** No test asserts that anything *renders correctly* —
 that text is legible, that nothing is clipped, that the §24.3 hop indicator
