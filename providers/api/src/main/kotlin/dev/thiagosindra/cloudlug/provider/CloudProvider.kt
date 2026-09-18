@@ -67,6 +67,22 @@ interface CloudProvider {
      */
     fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject>
 
+    /**
+     * The account's root, and the only [CloudObjectId] a caller can name
+     * without having discovered it from a previous call.
+     *
+     * [listChildren] takes an ID but had no way to produce the first one, so
+     * the wizard invented the literal `"root"` and the fake stored its
+     * top-level objects under `null`. They never matched, and the picker was
+     * empty for every provider — see docs/decisions.md ADR-0026.
+     *
+     * Root is spelled differently everywhere (Dropbox uses the empty string,
+     * Drive the literal `"root"`), so only the adapter can answer this. It
+     * takes an [AccountId] because a provider may expose more than one root
+     * per account, such as a personal and a team space.
+     */
+    fun rootOf(account: AccountId): CloudObjectId
+
     /** Null when the provider does not report quota (spec §20.7). */
     suspend fun quota(account: AccountId): StorageQuota?
 

@@ -141,6 +141,9 @@ class FakeCloudProvider(
     }
 
     /** One level, in insertion order (spec §9). */
+    override fun rootOf(account: AccountId): CloudObjectId =
+        CloudObjectId(type, FakeCloudStorage.ROOT_ID)
+
     override fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject> = flow {
         record(FailureInjection.Operation.ENUMERATE)
         failIfInjected(FailureInjection.Operation.ENUMERATE)

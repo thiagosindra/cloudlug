@@ -10,7 +10,6 @@ import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
 import dev.thiagosindra.cloudlug.provider.CloudObject
 import dev.thiagosindra.cloudlug.model.CloudObjectType
-import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.CloudSelection
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
@@ -92,7 +91,11 @@ class NewTransferViewModel @Inject constructor(
     }
 
     private fun browseSource() = viewModelScope.launch {
-        _state.update { it.copy(sourceChildren = childrenOfRoot(_state.value.source ?: return@launch)) }
+        val type = _state.value.source ?: return@launch
+        _state.update { it.copy(busy = true, error = null) }
+        runCatching { childrenOfRoot(type) }
+            .onSuccess { children -> _state.update { it.copy(sourceChildren = children, busy = false) } }
+            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(type, failure)) } }
     }
 
     fun toggleSourceSelection(objectId: String) {
@@ -105,12 +108,10 @@ class NewTransferViewModel @Inject constructor(
 
     fun toDestinationPicker() = viewModelScope.launch {
         val type = _state.value.destination ?: return@launch
-        _state.update {
-            it.copy(
-                step = WizardStep.PICK_DESTINATION,
-                destinationChildren = childrenOfRoot(type).filter { o -> o.type == CloudObjectType.FOLDER },
-            )
-        }
+        _state.update { it.copy(step = WizardStep.PICK_DESTINATION, busy = true, error = null) }
+        runCatching { childrenOfRoot(type).filter { it.type == CloudObjectType.FOLDER } }
+            .onSuccess { folders -> _state.update { it.copy(destinationChildren = folders, busy = false) } }
+            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(type, failure)) } }
     }
 
     fun chooseDestinationFolder(objectId: String) {
@@ -194,16 +195,19 @@ class NewTransferViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Asks the provider where its root is rather than guessing (ADR-0026).
+     *
+     * A failure here is not caught: an empty picker and a provider that threw
+     * look identical to the user, and this screen spent v0.2 reporting the
+     * second as the first. The callers above turn it into a visible message.
+     */
     private suspend fun childrenOfRoot(type: ProviderType): List<CloudObject> {
         val provider = providers.provider(type)
         val account = provider.authenticate()
-        return runCatching { provider.listChildren(account.id, rootOf(type)).toList() }
-            .getOrElse { emptyList() }
+        return provider.listChildren(account.id, provider.rootOf(account.id)).toList()
     }
 
-    private fun rootOf(type: ProviderType) = CloudObjectId(type, ROOT_ID)
-
-    private companion object {
-        const val ROOT_ID = "root"
-    }
+    private fun browseFailure(type: ProviderType, failure: Throwable): String =
+        failure.message ?: "Could not list the contents of $type"
 }

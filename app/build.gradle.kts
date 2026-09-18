@@ -56,6 +56,8 @@ dependencies {
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
+    // Hosts a ComponentActivity for createAndroidComposeRule; debug only.
+    debugImplementation(libs.compose.ui.test.manifest)
 
     // The emulator smoke test (spec §31.4). It launches the real Application,
     // so it builds the real Hilt graph and opens the real database — which is
@@ -63,4 +65,6 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.core.ktx)
     androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
 }

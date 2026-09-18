@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -112,8 +113,17 @@ fun NewTransferScreen(
                     )
 
                     WizardStep.PICK_SOURCE -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        if (state.sourceChildren.isEmpty()) {
+                            item { EmptyNotice(state, "There is nothing in this account to transfer.") }
+                        }
                         items(state.sourceChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
+                                // The whole row toggles, not just the checkbox:
+                                // a 24dp target beside a full-width row is the
+                                // wrong thing to aim at on a phone.
+                                modifier = Modifier.clickable {
+                                    viewModel.toggleSourceSelection(obj.id.opaqueId)
+                                },
                                 headlineContent = { SingleLine(obj.name) },
                                 supportingContent = {
                                     Text(
@@ -137,8 +147,14 @@ fun NewTransferScreen(
                     }
 
                     WizardStep.PICK_DESTINATION -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        if (state.destinationChildren.isEmpty()) {
+                            item { EmptyNotice(state, "This account has no folder to transfer into.") }
+                        }
                         items(state.destinationChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
+                                modifier = Modifier.clickable {
+                                    viewModel.chooseDestinationFolder(obj.id.opaqueId)
+                                },
                                 headlineContent = { SingleLine(obj.name) },
                                 leadingContent = {
                                     RadioButton(
@@ -193,6 +209,7 @@ private fun ProviderList(
         items(providers, key = { it.name }) { type ->
             val isDisabled = type in disabled
             ListItem(
+                modifier = Modifier.clickable(enabled = !isDisabled) { onSelect(type) },
                 headlineContent = { Text(providerLabel(type)) },
                 supportingContent = if (isDisabled) {
                     { Text("Already the source of this transfer", style = MaterialTheme.typography.bodySmall) }
@@ -209,6 +226,24 @@ private fun ProviderList(
             )
         }
     }
+}
+
+/**
+ * A list that draws nothing looks the same whether it is loading, empty or
+ * broken. That ambiguity is how ADR-0026's empty root survived to a device:
+ * the picker had no files and said nothing about it.
+ */
+@Composable
+private fun EmptyNotice(state: WizardState, message: String) {
+    Text(
+        text = when {
+            state.busy -> "Loading\u2026"
+            state.error != null -> "Nothing to show."
+            else -> message
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(16.dp),
+    )
 }
 
 /** Step 5: everything §24.2 asks the user to confirm before any byte moves. */

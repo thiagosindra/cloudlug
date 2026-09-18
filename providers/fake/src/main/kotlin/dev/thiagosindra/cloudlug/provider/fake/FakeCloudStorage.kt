@@ -67,9 +67,14 @@ class FakeCloudStorage(
         put(FakeObject(id = newId(), name = name, parentId = parent?.opaqueId, type = CloudObjectType.SHORTCUT))
 
     fun childrenOf(parentId: String?): List<CloudObject> =
-        objects.values.filter { it.parentId == parentId }.map { it.toCloudObject() }
+        objects.values.filter { it.parentId == canonical(parentId) }.map { it.toCloudObject() }
 
     fun find(id: String): CloudObject? = objects[id]?.toCloudObject()
+
+    companion object {
+        /** What [FakeCloudProvider.rootOf] hands back; see ADR-0026. */
+        const val ROOT_ID = "root"
+    }
 
     fun contentOf(id: String): ByteArray? = objects[id]?.content
 
@@ -105,7 +110,7 @@ class FakeCloudStorage(
 
     internal fun ensureFolder(name: String, parentId: String?): Pair<CloudObject, Boolean> {
         val existing = objects.values.firstOrNull {
-            it.parentId == parentId && it.name == name && it.type == CloudObjectType.FOLDER
+            it.parentId == canonical(parentId) && it.name == name && it.type == CloudObjectType.FOLDER
         }
         if (existing != null) return existing.toCloudObject() to false
         val id = folder(name, parentId?.let { CloudObjectId(providerType, it) })
@@ -113,9 +118,20 @@ class FakeCloudStorage(
     }
 
     private fun put(obj: FakeObject): CloudObjectId {
-        objects[obj.id] = obj
+        objects[obj.id] = obj.copy(parentId = canonical(obj.parentId))
         return CloudObjectId(providerType, obj.id)
     }
+
+    /**
+     * The root is spelled two ways and stored one way.
+     *
+     * A caller that went through [FakeCloudProvider.rootOf] holds [ROOT_ID],
+     * while the demo tree and most tests seed with no parent at all. Both mean
+     * the top of the account, so every parent is folded to `null` on the way in
+     * and on every lookup. Without this the two spellings silently describe
+     * different places, which is the defect ADR-0026 records.
+     */
+    private fun canonical(parentId: String?): String? = parentId?.takeUnless { it == ROOT_ID }
 
     private fun newId(): String = "obj-${nextId++}"
 
