@@ -3,7 +3,7 @@ package dev.thiagosindra.cloudlug.database
 import dev.thiagosindra.cloudlug.database.dao.CloudLugDatabase
 import dev.thiagosindra.cloudlug.database.entity.CacheChunkEntity
 import dev.thiagosindra.cloudlug.database.inmemory.InMemoryCloudLugDatabase
-import dev.thiagosindra.cloudlug.database.room.CloudLugDatabases
+import dev.thiagosindra.cloudlug.database.room.TestDatabases
 import dev.thiagosindra.cloudlug.database.state.IllegalItemTransitionException
 import dev.thiagosindra.cloudlug.database.state.IllegalTransferTransitionException
 import dev.thiagosindra.cloudlug.model.CacheChunkId
@@ -267,5 +267,5 @@ class InMemoryTransactionContractTest : TransactionContractTest() {
  * when someone plugs a phone in (ADR-0021).
  */
 class RoomTransactionContractTest : TransactionContractTest() {
-    override fun newDatabase(): CloudLugDatabase = CloudLugDatabases.inMemory()
+    override fun newDatabase(): CloudLugDatabase = TestDatabases.inMemory()
 }

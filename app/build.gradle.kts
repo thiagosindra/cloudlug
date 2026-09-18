@@ -12,8 +12,9 @@ android {
 
     defaultConfig {
         applicationId = "dev.thiagosindra.cloudlug"
-        versionCode = 1
-        versionName = "0.2"
+        versionCode = 2
+        versionName = "0.2.1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildFeatures { compose = true }
@@ -50,8 +51,16 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.sqlite.framework)
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)
+
+    // The emulator smoke test (spec §31.4). It launches the real Application,
+    // so it builds the real Hilt graph and opens the real database — which is
+    // the whole point, and why it needs no Hilt test runner of its own.
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core.ktx)
+    androidTestImplementation(libs.androidx.test.ext.junit)
 }

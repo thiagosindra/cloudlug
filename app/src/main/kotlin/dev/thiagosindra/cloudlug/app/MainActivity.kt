@@ -1,10 +1,15 @@
 package dev.thiagosindra.cloudlug.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -14,6 +19,8 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.thiagosindra.cloudlug.feature.home.HomeScreen
 import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
 import dev.thiagosindra.cloudlug.feature.transferdetails.TransferDetailScreen
+import dev.thiagosindra.cloudlug.app.crash.CrashReportScreen
+import dev.thiagosindra.cloudlug.app.crash.crashReporter
 import dev.thiagosindra.cloudlug.ui.CloudLugTheme
 
 @AndroidEntryPoint
@@ -21,9 +28,39 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Read once, before composing: consuming clears the file, so a crash
+        // is shown on the next launch and not the one after that.
+        val pendingCrash = crashReporter(this).consumePendingReport()
+
         setContent {
-            CloudLugTheme { CloudLugNavHost() }
+            CloudLugTheme {
+                var crash by remember { mutableStateOf(pendingCrash) }
+                val report = crash
+                if (report != null) {
+                    CrashReportScreen(
+                        report = report,
+                        onShare = { share(report) },
+                        onDismiss = { crash = null },
+                    )
+                } else {
+                    CloudLugNavHost()
+                }
+            }
         }
+    }
+
+    /**
+     * Hands the text to whatever the user picks. Plain text rather than a
+     * FileProvider URI: the report never leaves `filesDir` this way, and the
+     * user sees exactly what they are sending before they send it.
+     */
+    private fun share(report: String) {
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "CloudLug crash report")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(Intent.createChooser(intent, "Share crash report"))
     }
 }
 

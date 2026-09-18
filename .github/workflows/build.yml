@@ -100,3 +100,104 @@ jobs:
         with:
           name: test-reports-android
           path: "**/build/reports/**"
+
+  instrumented:
+    name: Emulator smoke test (:app on a device)
+    runs-on: ubuntu-latest
+    # The one class of bug the other two jobs structurally cannot catch: a JVM
+    # module naming a platform-specific API. v0.2 was green on both and still
+    # died on launch — see docs/decisions.md ADR-0025.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The runner exposes KVM only after this; without it the emulator falls
+      # back to software rendering and the job takes long enough to be useless.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Anything that stops the emulator process from starting looks identical
+      # downstream: the device never registers, and the action polls a dead
+      # port until it times out. These two steps assert the preconditions up
+      # front so a failure names itself instead of having to be inferred.
+      - name: Require hardware acceleration
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::No /dev/kvm on this runner. The x86_64 emulator cannot start."
+            exit 1
+          fi
+          ls -l /dev/kvm
+
+      # The real cause of four consecutive "Timeout waiting for emulator to
+      # boot" failures, which the emulator states plainly and the action then
+      # swallows:
+      #
+      #   FATAL | Not enough space to create userdata partition.
+      #           Available: 7131.55 MB, need 7372.80 MB.
+      #
+      # 241 MB short. The runner ships toolchains this build never touches —
+      # CloudLug is pure Kotlin with no native code, so the NDK alone is dead
+      # weight. Dropping them buys headroom well beyond the shortfall.
+      - name: Free disk space for the AVD
+        run: |
+          df -h --output=avail / | tail -1 | xargs echo "Available before:"
+          sudo rm -rf \
+            /usr/local/lib/android/sdk/ndk \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL
+          df -h --output=avail / | tail -1 | xargs echo "Available after:"
+          avail=$(df -m --output=avail /home/runner | tail -1 | tr -d ' ')
+          if [ "$avail" -lt 12000 ]; then
+            echo "::error::Only ${avail} MB free; the AVD needs ~7.4 GB plus build output."
+            exit 1
+          fi
+
+      - name: Run the smoke test on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # `default`, not `google_apis`: CloudLug uses no Play services at all
+          # — §3 names none and §27 rules out the analytics they usually carry —
+          # so the Play image only adds boot time to a test that launches one
+          # activity. API 30 for the same reason: this test asserts the app
+          # starts and Room opens, which every supported API does identically,
+          # and the §17 UIDT behaviour that would justify 34+ is v0.5 work with
+          # its own §31.4 scenarios. Earlier runs chose 34/google_apis on my
+          # reasoning about what to cover rather than what this test needs, and
+          # the emulator timed out three times without booting.
+          api-level: 30
+          target: default
+          arch: x86_64
+          force-avd-creation: false
+          disable-animations: true
+          emulator-boot-timeout: 300
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Upload instrumentation reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-instrumented
+          path: |
+            app/build/reports/androidTests/**
+            app/build/outputs/androidTest-results/**

@@ -21,8 +21,9 @@ minSdk = "26"
 targetSdk = "36"
 
 room = "2.8.5"
-# Room 2.8.5 resolves androidx.sqlite 2.6.2; the bundled driver must match so
-# the JVM tests and the Android build run the same SQLite.
+# Room 2.8.5 resolves androidx.sqlite 2.6.2. The app uses the framework driver
+# (the platform's own SQLite); the JVM tests use the bundled one, which is the
+# only way to run Room off-device — ADR-0021 as revised, ADR-0025.
 sqlite = "2.6.2"
 hilt = "2.57.2"
 hiltNavigation = "1.2.0"
@@ -31,6 +32,9 @@ activityCompose = "1.12.0"
 navigationCompose = "2.9.5"
 lifecycle = "2.9.1"
 coreKtx = "1.16.0"
+androidxTest = "1.6.2"
+androidxTestCore = "1.6.1"
+androidxTestJunit = "1.2.1"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -42,6 +46,7 @@ junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "sqlite" }
 
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }
@@ -59,6 +64,10 @@ compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
+
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTest" }
+androidx-test-core-ktx = { module = "androidx.test:core-ktx", version.ref = "androidxTestCore" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

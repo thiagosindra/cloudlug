@@ -436,9 +436,14 @@ that swapping the in-memory store for Room could not change behaviour; that is
 only worth something if both are held to the same assertions instead of two
 suites that drift.
 
-`BundledSQLiteDriver` is used on Android as well as on the JVM, so the app and
+~~`BundledSQLiteDriver` is used on Android as well as on the JVM, so the app and
 the tests exercise the same SQLite build rather than whichever version a given
-device ships.
+device ships.~~ **Revised in v0.2.1.** The app uses `AndroidSQLiteDriver`. One
+shared SQLite sounded tidy, but it put a second native SQLite in the APK — 5 MB
+across four ABIs — for no behaviour the app can observe, and the JVM tests need
+the bundled driver whatever the app does. The tests still prove the §13 rules
+hold against real SQLite; they no longer claim to prove it against the *same*
+build the device runs. See ADR-0025.
 
 **What changes it.** If a future Room release drops JVM support, these become
 instrumented tests and CI needs an emulator.
@@ -511,3 +516,60 @@ existed changed meaning, and the transfer engine does not use it.
 **What changes it.** Nothing foreseen. A provider with no way to list a folder's
 children could not back a browser at all, and would need a picker of its own —
 which is exactly the Google Picker problem §8.2 describes.
+
+---
+
+## ADR-0025 — A JVM module never names a platform-specific API
+
+**Question.** `:core:database` is a Kotlin/JVM module that ships inside an
+Android APK. Room publishes `room-runtime-jvm` and `room-runtime-android` as
+separate artifacts whose `RoomDatabase.Builder` constructors differ: the JVM one
+takes `(KClass, String, Function0)`, the Android one takes `(Context, Class,
+String)`. Gradle resolves the Android variant for `:app`, so a JVM module
+calling the JVM overload compiles against one artifact and runs against another.
+
+v0.2 did exactly that. It compiled, 273 JVM tests passed, both CI jobs were
+green, and the APK died on the first launch on a real phone:
+
+```
+java.lang.NoSuchMethodError: No direct method <init>(Lkotlin/reflect/KClass;
+  Ljava/lang/String;Lkotlin/jvm/functions/Function0;)V in class
+  Landroidx/room/RoomDatabase$Builder;
+  at ...database.room.CloudLugDatabases.atPath(CloudLugRoomDatabase.kt:122)
+```
+
+Both entry points were affected — `atPath`, and silently `inMemory`, which the
+tests used and which would have failed the same way had anything on Android
+called it.
+
+**Decision.** A JVM module in this repository names no API whose signature
+depends on the platform. Construction belongs to whoever knows the platform,
+which is the rule `NetworkMonitor`, `StorageMonitor`, `ProviderRegistry` and
+`ChunkStore` already follow (ADR-0003) — the database was simply missed.
+
+`:core:database` exposes the `@Database` subclass, the DAOs, a
+`CloudLugDatabaseFactory` seam and `asCloudLugDatabase()`. `:app` implements the
+factory with Room's Android builder and `AndroidSQLiteDriver`; the JVM tests
+implement it in `TestDatabases` with `BundledSQLiteDriver`.
+
+**Why two guards, not one.** The emulator test is the honest one: it launches
+the real Application, builds the real Hilt graph and opens the real database, so
+it catches this whole class of defect rather than this instance of it. But it
+needs an emulator, takes minutes, and is the job most likely to be skipped when
+it is flaky. `NoPlatformSpecificRoomApiTest` scans this module's main source set
+for Room construction APIs and for the bundled driver escaping test scope; it
+runs in milliseconds on every JVM build and names the rule rather than the
+symptom. It was confirmed to fail on the reintroduced v0.2 call before it was
+kept — a guard that has never failed is not known to work.
+
+**What changes it.** If Room's Android and JVM artifacts ever converge on one
+constructor signature, the scan becomes unnecessary. The emulator test does not:
+it covers the general case, of which Room was one instance.
+
+**The wider lesson, which the spec now carries in §33.** A milestone whose
+acceptance criterion is "`./gradlew build` is green" can ship an app that cannot
+start. v0.2's own `docs/status.md` said in as many words that nothing had run on
+a device and named "whether the Hilt graph constructs" and "whether
+`BundledSQLiteDriver` opens a database in an app data directory" as the first
+things to check — and both were exactly what broke. Writing the risk down is not
+the same as testing it.
