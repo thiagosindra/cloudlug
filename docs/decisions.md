@@ -646,3 +646,54 @@ to draw, so a test that bypassed the screen would have missed it. The picker
 rows became clickable in the same change: a 24dp checkbox beside a full-width
 row is the wrong thing to aim at on a phone, and it was also the only thing a
 test could aim at.
+
+## ADR-0027 — Cancel order, and what an exception from a worker means
+
+**Status.** Accepted in v0.3, pending spec ratification. Both rules are how the
+engine behaves; this entry exists so the text owns them rather than leaving them
+as properties of one implementation.
+
+**Context.** §22.2 says cancelling one file leaves the rest of the transfer
+running. PR #8 found that it did the opposite whenever the cancelled file was
+the one *in flight* — which is the only interesting case, and one that could not
+be reached at all until §31.3's slow-source injection existed. `cancelItem`
+aborts the item's upload session underneath a worker still processing it; the
+worker's next call fails, and the resulting `UploadSessionRestartException` was
+neither of the two types `run()` caught, so it escaped, killed the job, and left
+every remaining item `PENDING` with the transfer stuck in `RUNNING`.
+
+**Decision 1 — the item is marked terminal before its session is touched.**
+`cancelItem` records `CANCELLED` first, then aborts the upload session, then
+discards the chunks. The engine decides whether a worker's failure was expected
+by re-reading the item's status, so that status has to be true *before* anything
+is done that can make the worker fail. In the other order there is a window in
+which the row still reads `DOWNLOADING` while the session is already gone; a
+failure arriving in that window is indistinguishable from a real fault and ends
+the transfer. The window is narrow and invisible under a test scheduler, which
+is why the original order survived PR #8's test.
+
+A worker failure on an item that is already terminal is therefore *expected*,
+not an error: the user asked for that file to stop.
+
+**Decision 2 — the exception taxonomy of `TransferEngine.run()`.** Three rules,
+in this order:
+
+1. `CancellationException` always propagates. Pause cancels the job (§22.1) and
+   that must keep unwinding. It is re-thrown before anything else because the
+   status re-read below is a suspending call, which would itself throw on an
+   already-cancelled coroutine.
+2. A failure for an item that settled meanwhile is swallowed and the run
+   continues with the next item. This is Decision 1 seen from the other side.
+3. A failure for an item that is still live propagates **unless** it is a
+   `CloudException`, which the retry policy has already judged permanent for
+   that item; those mark the item `FAILED` so the transfer can still finish
+   `COMPLETED_WITH_ISSUES` (§13.1). Anything else is a defect in CloudLug and is
+   not swallowed by a broad catch.
+
+The check is in `run()` rather than in the worker because the worker holds a
+snapshot of the item taken before the cancellation; only a fresh read is
+authoritative.
+
+**What changes it.** If the engine ever runs items concurrently, "the item that
+was in flight" stops being singular and the re-read has to move into whatever
+owns per-item lifecycle. The rules survive; their home does not.

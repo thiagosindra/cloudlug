@@ -32,6 +32,10 @@ include(
     ":providers:google-drive",
 )
 
+// Not shipped. A §36 validation harness, run by hand against a real account:
+// it needs a token and the network, so it is never part of `build` or CI.
+include(":tools:dropbox-hash-check")
+
 // Android modules from spec §4 and the §24 screens.
 include(
     ":app",
