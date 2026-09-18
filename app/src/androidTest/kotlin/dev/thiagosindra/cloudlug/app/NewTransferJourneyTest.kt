@@ -1,10 +1,13 @@
 package dev.thiagosindra.cloudlug.app
 
-import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.ComposeTimeoutException
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -31,47 +34,69 @@ class NewTransferJourneyTest {
 
     @Test
     fun a_transfer_can_be_started_from_the_wizard() {
-        compose.onNodeWithText("New Transfer").performClick()
+        // Waits before the first touch as well as every later one. The first
+        // run of this test failed here, and a bare click cannot say whether the
+        // home screen had not composed yet or whether MainActivity was showing
+        // a crash report instead — awaitText prints the screen either way.
+        node("New Transfer").performClick()
 
         // 1 and 2: the two accounts. §2.2 forbids transferring to the same
         // provider, so the destination list must still offer the other one.
         awaitText("1. Choose the source account")
-        compose.onNodeWithText("Dropbox").performClick()
+        node("Dropbox").performClick()
 
         awaitText("2. Choose the destination account")
-        compose.onNodeWithText("Google Drive").performClick()
+        node("Google Drive").performClick()
 
         // 3: the step that was empty. The demo tree seeds these three folders,
         // so their absence is the v0.2.1 defect exactly.
         awaitText("3. Choose what to transfer")
-        awaitText("photos")
-        compose.onNodeWithText("docs").assertIsDisplayed()
-        compose.onNodeWithText("projects").assertIsDisplayed()
-
-        compose.onNodeWithText("photos").performClick()
-        compose.onNodeWithText("Next").performClick()
+        node("docs")
+        node("projects")
+        node("photos").performClick()
+        node("Next").performClick()
 
         // 4: destination folders, seeded the same way and broken the same way.
         awaitText("4. Choose the destination folder")
-        awaitText("My Drive")
-        compose.onNodeWithText("My Drive").performClick()
-        compose.onNodeWithText("Review").performClick()
+        node("My Drive").performClick()
+        node("Review").performClick()
 
         // 5: the manifest is built here, so this is also the first proof that
         // the engine runs end to end inside the app rather than only in JVM
         // tests.
         awaitText("5. Review", timeoutMillis = 60_000)
-        compose.onNodeWithText("Start transfer").performClick()
+        node("Start transfer").performClick()
 
         awaitText("Transfer started.")
     }
 
-    /** The engine works off the main thread, so every step is awaited. */
+    /** Waits for [text] to exist, then returns it for clicking. */
+    private fun node(text: String): SemanticsNodeInteraction {
+        awaitText(text)
+        return compose.onNodeWithText(text)
+    }
+
+    /**
+     * The engine works off the main thread, so every step is awaited.
+     *
+     * On timeout it prints the semantics tree. A Compose failure otherwise says
+     * only that a node was absent, which leaves the interesting half — what was
+     * on screen instead — to be guessed at from a CI log.
+     */
     private fun awaitText(text: String, timeoutMillis: Long = 20_000) {
-        compose.waitUntil(timeoutMillis) {
-            compose.onAllNodesWithText(text, substring = true)
-                .fetchSemanticsNodes()
-                .isNotEmpty()
+        try {
+            compose.waitUntil(timeoutMillis) {
+                compose.onAllNodesWithText(text, substring = true)
+                    .fetchSemanticsNodes()
+                    .isNotEmpty()
+            }
+        } catch (timeout: ComposeTimeoutException) {
+            throw AssertionError(
+                "Never found \"$text\" within ${timeoutMillis}ms. On screen instead:\n" +
+                    runCatching { compose.onRoot().printToString(maxDepth = 100) }
+                        .getOrElse { "<could not print the semantics tree: $it>" },
+                timeout,
+            )
         }
     }
 }
