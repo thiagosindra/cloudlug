@@ -1,13 +1,14 @@
 package dev.thiagosindra.cloudlug.app
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -79,9 +80,11 @@ class NewTransferJourneyTest {
     /**
      * The engine works off the main thread, so every step is awaited.
      *
-     * On timeout it prints the semantics tree. A Compose failure otherwise says
-     * only that a node was absent, which leaves the interesting half — what was
-     * on screen instead — to be guessed at from a CI log.
+     * On timeout it reports every string on screen, on one line. An earlier
+     * version printed the whole semantics tree, which was the right idea and
+     * the wrong channel: Gradle's console kept the first two lines of the
+     * message and dropped the tree, so the run cost a cycle and answered
+     * nothing.
      */
     private fun awaitText(text: String, timeoutMillis: Long = 20_000) {
         try {
@@ -91,12 +94,36 @@ class NewTransferJourneyTest {
                     .isNotEmpty()
             }
         } catch (timeout: ComposeTimeoutException) {
-            throw AssertionError(
-                "Never found \"$text\" within ${timeoutMillis}ms. On screen instead:\n" +
-                    runCatching { compose.onRoot().printToString(maxDepth = 100) }
-                        .getOrElse { "<could not print the semantics tree: $it>" },
-                timeout,
-            )
+            throw AssertionError(diagnose(text), timeout)
         }
+    }
+
+    private fun diagnose(missing: String): String {
+        val onScreen = runCatching { textsOnScreen() }
+            .getOrElse { return "Never found \"$missing\", and the screen could not be read: $it" }
+        val prefix = if (onScreen.any { it.startsWith(CRASH_SCREEN_TITLE) }) {
+            // Not a flaw in this test. FirstRunSmokeTest runs first in the same
+            // app data directory, so a crash it recorded is displayed on the
+            // next launch — meaning the app threw an uncaught exception, which
+            // matters far more than the assertion that tripped over it.
+            "THE APP CRASHED EARLIER: MainActivity is showing the crash reporter, " +
+                "not the home screen. Fix the exception below, not this test. "
+        } else {
+            ""
+        }
+        return prefix + "Never found \"$missing\". On screen: " +
+            onScreen.joinToString(" | ") { it.replace('\n', ' ') }.take(3000)
+    }
+
+    /** Every string the screen is currently drawing, flattened. */
+    private fun textsOnScreen(): List<String> =
+        compose.onAllNodes(hasText("", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .flatMap { node ->
+                node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+            }
+
+    private companion object {
+        const val CRASH_SCREEN_TITLE = "CloudLug crashed last time"
     }
 }
