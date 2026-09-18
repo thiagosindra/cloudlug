@@ -61,7 +61,7 @@ interface TransferItemDao {
      * The idempotency record of spec §19.2: every completed item across all
      * transfers that moved this source object from this account.
      *
-     * TODO(v0.2): in Room this is a join against the transfer table on
+     * TODO(§33 v0.2): in Room this is a join against the transfer table on
      * `sourceAccountId`; it is a query, not a second table.
      */
     suspend fun findCompletedForSourceObject(
