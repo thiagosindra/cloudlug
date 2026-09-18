@@ -1,11 +1,22 @@
 # CloudLug — Technical Design Specification
 
 **Local-Only Cloud-to-Cloud File Transfer for Android**
-*Technical Design Specification v1.2.1 • Open Source • Google Play*
+*Technical Design Specification v1.3 • Open Source • Google Play*
 
 CloudLug transfers files between supported cloud-storage providers using the user's Android device as the only intermediary. The application operates no file-transfer backend and is designed from the start around provider-neutral adapters, durable recovery, bounded local caching, conservative destination behavior, and future expansion to additional cloud services.
 
 ---
+
+## Changes in v1.3
+
+Amendments from the v0.2 implementation report (ADRs 0019–0024). All six are ratified.
+
+- **§19.4 checkpoint state is constant-size (ADR-0019).** The block hash checkpoints as the outer streaming hasher's state plus the current partial block's inner state, not a list of block digests. v1.2 described the state; it did not intend to prescribe a representation that grows with the object.
+- **§5 gains `listChildren` (ADR-0024).** A picker browses one level at a time; `enumerate` walks a subtree depth-first. They are different operations.
+- **§10 and §35: `start()` is separate from `run()` (ADR-0020, ADR-0022).** Enclosing-folder creation fails with zero bytes moved; a failure inside `run()` leaves a resumable manifest. The Transfer Controller owns the running coroutine; the engine is scope-free.
+- **§24.2 review shows "at least X" when any item's size is unknown.**
+- **§12.1: `totalFiles` and the outcome counters count the same population** (non-folder items). Folders are tracked separately. A latent v0.1 bug found when the UI first drew a progress bar.
+- **§31.3: slow source and slow destination are required injections**, because mid-file pause/resume cannot be tested without them.
 
 ## Changes in v1.2.1
 
@@ -159,6 +170,7 @@ interface CloudProvider {
 
     suspend fun resolveMetadata(account: AccountId, objectId: CloudObjectId): CloudObject
     fun enumerate(account: AccountId, selection: CloudSelection, resumeAfter: CloudObjectId? = null): Flow<CloudObject>
+    fun listChildren(account: AccountId, parent: CloudObjectId?): Flow<CloudObject>   // one level; null parent = account root
     suspend fun quota(account: AccountId): StorageQuota?
 
     suspend fun openDownload(account: AccountId, objectId: CloudObjectId, range: LongRange?): CloudDownload
@@ -196,7 +208,7 @@ data class ProviderCapabilities(
 )
 ```
 
-`enumerate` is a cold flow, so it is not `suspend`. `resumeAfter` is the ID of the last object the caller persisted; an adapter that cannot resume from an object ID may restart from the beginning, and the manifest builder deduplicates by source object ID (§11).
+`listChildren` returns the immediate children of one folder and is what the pickers (§9) are built on. `enumerate` walks an entire selection depth-first and is what the manifest builder (§11) uses; a picker must never call it, because opening an account root would enumerate everything before a single row could be drawn. Both are cold flows, so neither is `suspend`. `resumeAfter` is the ID of the last object the caller persisted; an adapter that cannot resume from an object ID may restart from the beginning, and the manifest builder deduplicates by source object ID (§11).
 
 `lookupDestination` returns a list because some providers (Google Drive) allow multiple siblings with the same name. Capabilities allow the engine to adapt to future providers rather than encoding provider-specific assumptions.
 
@@ -277,7 +289,7 @@ Use AppAuth-Android with Chrome Custom Tabs and a custom-scheme or App Links red
 
 A transfer first chooses two different providers/accounts. Selecting a provider as source disables the same provider as destination. Accounts whose granted scopes cannot support a role are disabled for that role with an explanation.
 
-The v1 source picker is an in-app browser built on the provider's enumeration API. The transfer engine must not care how a selection was obtained.
+The v1 source picker is an in-app browser built on `listChildren` (§5), one folder level at a time. The transfer engine must not care how a selection was obtained.
 
 ```kotlin
 interface CloudSelectionProvider {
@@ -320,7 +332,7 @@ CloudLug - 2026-09-17 09-57/
 
 Original relative paths are preserved, including empty folders. Independent transfers must not silently merge into the same enclosing folder: because the name has minute resolution, a second transfer created in the same minute gets a numeric suffix on the enclosing folder (`CloudLug - 2026-09-17 09-57 (2)`). Items inside are never auto-renamed. The enclosing-folder name uses only characters legal on every supported provider (no `: / \ < > " | ? *`).
 
-The enclosing folder is created at the `READY → RUNNING` transition, not during `PREPARING`. The destination picker has already shown the folder is browsable and §20.7 has shown there is space; if creation fails at start, the transfer fails fast with zero bytes moved. Creating it earlier leaves an empty folder behind whenever a user reviews a manifest and abandons it.
+The enclosing folder is created by `TransferEngine.start()`, which performs the `READY → RUNNING` transition and nothing else; item processing happens in `run()`. The two are separate because their failures mean different things: a failure in `start()` leaves zero bytes moved and no partial state, while a failure inside `run()` leaves a resumable manifest. The destination picker has already shown the folder is browsable and §20.7 has shown there is space; if creation fails at start, the transfer fails fast with zero bytes moved. Creating it earlier leaves an empty folder behind whenever a user reviews a manifest and abandons it.
 
 ## 11. Transfer Manifest
 
@@ -341,7 +353,8 @@ destinationRootId, destinationContainerId, destinationContainerName
 status, networkPolicy
 enumerationCursor
 totalFiles, completedFiles, duplicateFiles, unsupportedFiles, sourceChangedFiles,
-  conflictFiles, failedFiles, cancelledFiles
+  conflictFiles, failedFiles, cancelledFiles      (non-folder items only; all count the same population)
+totalFolders, createdFolders
 totalBytes, completedBytes, unknownSizeFiles
 lastErrorCode, lastErrorMessage
 ```
@@ -541,7 +554,7 @@ The hash pipeline runs once, incrementally, as bytes pass through the phone. It 
   - Dropbox: `content_hash` = SHA-256 of the concatenated SHA-256 digests of each 4 MiB block.
   - Google Drive: MD5 (`md5Checksum`); the v3 API also reports `sha1Checksum` / `sha256Checksum`, so store SHA-256 and compare whichever is returned.
 
-**Hashers are checkpointable.** SHA-256, MD5, and the Dropbox block hash all have small internal state (a few words, a bit count, and under 64 bytes of pending buffer, plus for the block hash the list of completed block digests at 32 bytes per 4 MiB). CloudLug implements these hashers with serializable state rather than using `MessageDigest` directly, and persists that state as the item's `hashCheckpoint` in the same transaction as each chunk acknowledgment. After process death, hashing resumes from the checkpoint, so verification (§21) never degrades because acknowledged chunks have been deleted from the cache.
+**Hashers are checkpointable.** SHA-256, MD5, and the Dropbox block hash all have small, constant-size internal state: a few chaining words, a bit count, and under 64 bytes of pending buffer. The block hash's outer digest is itself a streaming SHA-256, so each block's digest is folded into it as the block closes; its checkpoint is the outer hasher's state plus the current partial block's inner state, never a list of block digests. This gives byte-identical output from state that does not grow with the object. CloudLug implements these hashers with serializable state rather than using `MessageDigest` directly, and persists that state as the item's `hashCheckpoint` in the same transaction as each chunk acknowledgment. After process death, hashing resumes from the checkpoint, so verification (§21) never degrades because acknowledged chunks have been deleted from the cache.
 
 Do not reread a multi-gigabyte cached object merely to hash it. Source provider hashes are used opportunistically for pre-download duplicate detection when the algorithms are comparable (Dropbox → Drive: they are not; the source hash is only useful for detecting source changes).
 
@@ -658,7 +671,7 @@ History
 2. Choose destination provider/account; same provider is disabled.
 3. Use source picker to select files/folders.
 4. Use destination picker to select the parent destination folder.
-5. Review size, file count, items to be skipped or in conflict (§20), network policy, available local storage, destination quota, cache limit, and destination enclosing folder.
+5. Review size (shown as "at least X" when any item's size is unknown, §11), file count, items to be skipped or in conflict (§20), network policy, available local storage, destination quota, cache limit, and destination enclosing folder.
 6. Start transfer.
 
 ### 24.3 Transfer Detail
@@ -766,7 +779,7 @@ Test legal and illegal transfer/item state transitions, cache accounting, collis
 Every provider adapter should pass the same behavioral contract for authentication, enumeration (paged), quota, download/range download where supported, folder creation, upload, resume, session expiry, lookup (including multi-match), metadata, hashing behavior, and abort.
 
 ### 31.3 FakeCloudProvider
-Build `FakeCloudProvider` before real provider integrations. It should simulate network disconnect after N bytes, 429, 500, 403 rate-limit reasons, token expiration, corrupt chunks, destination conflicts, duplicate-name siblings, provider-native documents, expired upload sessions, provider timeouts, slow source, slow destination, and unsupported capabilities.
+Build `FakeCloudProvider` before real provider integrations. It should simulate network disconnect after N bytes, 429, 500, 403 rate-limit reasons, token expiration, corrupt chunks, destination conflicts, duplicate-name siblings, provider-native documents, expired upload sessions, provider timeouts, and unsupported capabilities, plus **slow source and slow destination** (a configurable per-chunk delay). The slow injections are required, not optional: without them pause, resume, and cancel can only be tested as state transitions, never mid-file, and mid-file is where users will actually invoke them.
 
 Process interruption is a separate injection, not a network failure. A network error is retried and may end an item `FAILED`; a killed process must leave the database exactly as it was so §31.4 can test recovery. The fake therefore raises a non-provider exception for process death that the retry policy never sees. Conflating the two makes the §31.4 scenarios test error handling instead of recovery.
 
@@ -844,9 +857,9 @@ Do not add synchronization casually. Synchronization introduces materially diffe
 ```
 Compose UI
     |
-Transfer Controller
+Transfer Controller   (owns the running coroutine; survives screens; exposes state)
     |
-Transfer Engine
+Transfer Engine       (scope-free: start() creates the enclosing folder, run() processes items)
     |-- state machine
     |-- cache manager
     |-- integrity verifier (dual hash)
