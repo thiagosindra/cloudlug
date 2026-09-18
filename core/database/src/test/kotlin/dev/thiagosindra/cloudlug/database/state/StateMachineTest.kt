@@ -72,7 +72,7 @@ class StateMachineTest {
         assertFalse(TransferStateMachine.isLegal(TransferStatus.DRAFT, TransferStatus.RUNNING))
         assertFalse(TransferStateMachine.isLegal(TransferStatus.DRAFT, TransferStatus.COMPLETED))
         assertFalse(TransferStateMachine.isLegal(TransferStatus.PREPARING, TransferStatus.RUNNING))
-        assertFalse(TransferStateMachine.isLegal(TransferStatus.COMPLETED_WITH_ERRORS, TransferStatus.RUNNING))
+        assertFalse(TransferStateMachine.isLegal(TransferStatus.COMPLETED_WITH_ISSUES, TransferStatus.RUNNING))
     }
 
     @Test
@@ -90,7 +90,7 @@ class StateMachineTest {
 
     @Test
     fun `retry re-enters preparation from every unfinished terminal state`() {
-        listOf(TransferStatus.FAILED, TransferStatus.CANCELLED, TransferStatus.COMPLETED_WITH_ERRORS)
+        listOf(TransferStatus.FAILED, TransferStatus.CANCELLED, TransferStatus.COMPLETED_WITH_ISSUES)
             .forEach { assertTrue(TransferStateMachine.isLegal(it, TransferStatus.PREPARING), "$it -> PREPARING") }
         assertFalse(TransferStateMachine.isLegal(TransferStatus.COMPLETED, TransferStatus.PREPARING))
     }

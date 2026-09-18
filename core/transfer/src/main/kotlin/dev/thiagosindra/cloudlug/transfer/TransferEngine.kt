@@ -74,17 +74,21 @@ class TransferEngine(
     )
 
     /**
-     * Enumerates the selection, checks destination quota and creates the
-     * enclosing folder, leaving the transfer READY (spec §10, §11, §20.7).
+     * Enumerates the selection and checks destination quota, leaving the
+     * transfer READY (spec §11, §20.7).
+     *
+     * It deliberately does **not** create the enclosing folder. §10 moves that
+     * to `READY -> RUNNING`, because creating it here leaves an empty folder
+     * behind at the destination whenever a user reviews a manifest and
+     * abandons it (spec §24.2 step 5).
      *
      * Nothing here moves file bytes, so it is safe to run again after a crash:
-     * the manifest deduplicates by source object and folder creation is
-     * idempotent.
+     * the manifest deduplicates by source object.
      */
     suspend fun prepare(
         transferId: TransferId,
         selection: CloudSelection,
-        rootPathResolver: (CloudObject) -> CloudPath = { CloudPath.of(it.name) },
+        resumeAfter: CloudObjectId? = null,
     ): ManifestSummary {
         var transfer = repository.transitionTransfer(transferId, TransferStatus.PREPARING)
         val source = providers.provider(transfer.sourceProvider)
@@ -95,12 +99,11 @@ class TransferEngine(
             source = source,
             destinationCapabilities = destination.capabilities,
             selection = selection,
-            rootPathResolver = rootPathResolver,
+            resumeAfter = resumeAfter,
         )
 
         transfer = repository.findTransfer(transferId) ?: error("No transfer $transferId")
         checkDestinationQuota(transfer, destination)
-        createEnclosingFolder(transfer, destination)
 
         repository.transitionTransfer(transferId, TransferStatus.READY)
         return summary
@@ -147,6 +150,24 @@ class TransferEngine(
     }
 
     /**
+     * Takes a READY transfer to RUNNING, creating the enclosing folder on the
+     * way (spec §10).
+     *
+     * A separate step from [run] because §10 attaches folder creation to this
+     * one transition, and the two have different failure meanings: if creation
+     * fails the transfer fails fast with zero bytes moved, whereas a failure
+     * inside [run] leaves a partially transferred manifest to resume. [run]
+     * calls this itself when a transfer is not yet RUNNING, so resuming a paused
+     * transfer does not create a second folder.
+     */
+    suspend fun start(transferId: TransferId): TransferEntity {
+        val transfer = repository.findTransfer(transferId) ?: error("No transfer $transferId")
+        if (transfer.status == TransferStatus.RUNNING) return transfer
+        createEnclosingFolder(transfer, providers.provider(transfer.destinationProvider))
+        return repository.transitionTransfer(transferId, TransferStatus.RUNNING)
+    }
+
+    /**
      * Runs every unsettled item and returns the transfer's resulting status.
      *
      * Items are processed one at a time (spec §18), folders before the files
@@ -156,13 +177,12 @@ class TransferEngine(
      */
     suspend fun run(transferId: TransferId): TransferStatus {
         var transfer = repository.findTransfer(transferId) ?: error("No transfer $transferId")
-        if (transfer.status != TransferStatus.RUNNING) {
-            transfer = repository.transitionTransfer(transferId, TransferStatus.RUNNING)
-        }
-        repository.recoverInterruptedItems(transferId)
+        if (transfer.status != TransferStatus.RUNNING) transfer = start(transferId)
 
         val source = providers.provider(transfer.sourceProvider)
         val destination = providers.provider(transfer.destinationProvider)
+        repository.recoverInterruptedItems(transferId)
+
         val container = CloudObjectId(
             destination.type,
             transfer.destinationContainerId ?: error("Transfer $transferId has no enclosing folder"),
@@ -187,7 +207,7 @@ class TransferEngine(
                 return hold.status
             } catch (error: CloudException) {
                 // The retry policy already decided this is permanent for the item;
-                // the transfer carries on so it can finish COMPLETED_WITH_ERRORS.
+                // the transfer carries on so it can finish COMPLETED_WITH_ISSUES.
                 repository.transitionItem(current.id, TransferItemStatus.FAILED, ItemStatusReason.ERROR_PERMANENT) {
                     it.copy(lastErrorCode = error.code ?: error.kind.name, lastErrorMessage = error.message)
                 }

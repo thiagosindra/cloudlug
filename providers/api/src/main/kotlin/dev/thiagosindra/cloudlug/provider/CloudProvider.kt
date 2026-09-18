@@ -35,10 +35,22 @@ interface CloudProvider {
 
     /**
      * Walks [selection] depth-first, emitting every descendant including empty
-     * folders (spec §20.5). Enumeration is paged internally and may be resumed
-     * from [CloudSelection.resumeCursor] (spec §11).
+     * folders (spec §20.5).
+     *
+     * Not `suspend`: returning a cold [Flow] does not suspend, and v1.2 §5
+     * removed the modifier the v1.1 signature carried (ADR-0015).
+     *
+     * [resumeAfter] is the ID of the last object the caller persisted, so a walk
+     * of a large tree survives process death (spec §11). An adapter that cannot
+     * resume from an object ID may restart from the beginning; the manifest
+     * builder deduplicates by source object ID, so a restart is idempotent,
+     * only slower.
      */
-    suspend fun enumerate(account: AccountId, selection: CloudSelection): Flow<CloudObject>
+    fun enumerate(
+        account: AccountId,
+        selection: CloudSelection,
+        resumeAfter: CloudObjectId? = null,
+    ): Flow<CloudObject>
 
     /** Null when the provider does not report quota (spec §20.7). */
     suspend fun quota(account: AccountId): StorageQuota?
@@ -120,6 +132,14 @@ data class ProviderCapabilities(
     val maxUploadChunkBytes: Long,
     val illegalNameCharacters: Set<Char>,
     val maxNameLength: Int,
+    /**
+     * Longest full path the provider accepts, or null when it has no such limit
+     * (spec §5, §20.4). Added in v1.2; ADR-0013 deferred it for want of a
+     * capability flag.
+     */
+    val maxPathLength: Int?,
+    /** True when the provider rejects names ending in a space or a dot (spec §20.4). */
+    val disallowsTrailingSpaceOrDot: Boolean,
 ) {
     init {
         require(uploadChunkAlignment > 0) { "uploadChunkAlignment must be positive" }
@@ -127,6 +147,9 @@ data class ProviderCapabilities(
             "maxUploadChunkBytes must be at least one alignment unit"
         }
         require(maxNameLength > 0) { "maxNameLength must be positive" }
+        require(maxPathLength == null || maxPathLength >= maxNameLength) {
+            "maxPathLength must leave room for at least one maximum-length name"
+        }
         require(!supportsServerHash || nativeHashAlgorithm != null) {
             "A provider that declares supportsServerHash must name its hash algorithm"
         }

@@ -19,12 +19,21 @@ enum class TransferStatus {
     FAILED,
     CANCELLED,
     COMPLETED,
-    COMPLETED_WITH_ERRORS,
+
+    /**
+     * At least one item did not reach COMPLETED or SKIPPED_DUPLICATE (spec
+     * §13.1). A transfer that moved half of what the user selected must never
+     * read "Completed" (§2.5), so unsupported, source-changed, conflicted,
+     * failed and cancelled items all land here and the summary shows each count
+     * separately. Named ISSUES rather than ERRORS because a skipped Google-native
+     * document is not an error.
+     */
+    COMPLETED_WITH_ISSUES,
     ;
 
     /** True when the transfer will not change state again without user action. */
     val isTerminal: Boolean
-        get() = this == FAILED || this == CANCELLED || this == COMPLETED || this == COMPLETED_WITH_ERRORS
+        get() = this == FAILED || this == CANCELLED || this == COMPLETED || this == COMPLETED_WITH_ISSUES
 
     /** True when the transfer is holding, waiting for a condition to clear (spec §16, §15.1, §23). */
     val isWaiting: Boolean

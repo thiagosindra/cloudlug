@@ -108,17 +108,22 @@ class FakeCloudProvider(
      * Depth-first, parents before children, paged (spec §5, §11). Emits empty
      * folders too, because the destination tree preserves them (§20.5).
      */
-    override suspend fun enumerate(account: AccountId, selection: CloudSelection): Flow<CloudObject> {
-        record(FailureInjection.Operation.ENUMERATE)
-        val resumeAfter = selection.resumeCursor
+    override fun enumerate(
+        account: AccountId,
+        selection: CloudSelection,
+        resumeAfter: CloudObjectId?,
+    ): Flow<CloudObject> {
         return flow {
+            // Recorded inside the flow: enumerate no longer suspends, so nothing
+            // happens until collection starts (spec §5).
+            record(FailureInjection.Operation.ENUMERATE)
             var emitted = 0
             var skipping = resumeAfter != null
-            val stack = ArrayDeque(selection.roots.reversed())
+            val stack = ArrayDeque(selection.objects.reversed())
             while (stack.isNotEmpty()) {
                 val current = stack.removeLast()
                 if (skipping) {
-                    if (current.id.opaqueId == resumeAfter) skipping = false
+                    if (current.id == resumeAfter) skipping = false
                 } else {
                     emit(current)
                     emitted++
@@ -347,6 +352,8 @@ class FakeCloudProvider(
             maxUploadChunkBytes: Long = 64L * 1024 * 1024,
             illegalNameCharacters: Set<Char> = setOf('/', '\\'),
             maxNameLength: Int = 255,
+            maxPathLength: Int? = null,
+            disallowsTrailingSpaceOrDot: Boolean = false,
         ) = ProviderCapabilities(
             canBeSource = canBeSource,
             canBeDestination = canBeDestination,
@@ -365,6 +372,8 @@ class FakeCloudProvider(
             maxUploadChunkBytes = maxUploadChunkBytes,
             illegalNameCharacters = illegalNameCharacters,
             maxNameLength = maxNameLength,
+            maxPathLength = maxPathLength,
+            disallowsTrailingSpaceOrDot = disallowsTrailingSpaceOrDot,
         )
 
         /** Hash helper for tests that assert on stored content. */

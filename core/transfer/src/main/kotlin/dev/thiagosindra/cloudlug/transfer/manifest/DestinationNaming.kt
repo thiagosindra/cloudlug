@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.transfer.manifest
 
+import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.provider.ProviderCapabilities
 import java.time.Instant
@@ -47,10 +48,9 @@ object EnclosingFolderNamer {
  * Returns the [ItemStatusReason] to record, or null when the name is fine. v1
  * does not auto-rename: an unrepresentable name is a conflict the user resolves.
  *
- * TODO(spec §20.4, v0.2): providers also differ on trailing spaces and dots and
- * on maximum *path* length. ProviderCapabilities as specified in §5 has no flag
- * for either, so those rules land with the first adapter that needs them — see
- * docs/decisions.md ADR-0013.
+ * Trailing spaces and dots and maximum path length are covered since v1.2 added
+ * `disallowsTrailingSpaceOrDot` and `maxPathLength` to §5 capabilities, which is
+ * what ADR-0013 was waiting for.
  */
 object DestinationNameLegality {
 
@@ -59,6 +59,21 @@ object DestinationNameLegality {
         name == "." || name == ".." -> ItemStatusReason.CONFLICT_ILLEGAL_NAME
         name.length > capabilities.maxNameLength -> ItemStatusReason.CONFLICT_ILLEGAL_NAME
         name.any { it in capabilities.illegalNameCharacters } -> ItemStatusReason.CONFLICT_ILLEGAL_NAME
+        capabilities.disallowsTrailingSpaceOrDot && (name.endsWith(" ") || name.endsWith(".")) ->
+            ItemStatusReason.CONFLICT_ILLEGAL_NAME
+
         else -> null
+    }
+
+    /**
+     * Whether the whole destination-relative path fits (spec §5, §20.4).
+     *
+     * Checked separately from [check] because a path can exceed the limit while
+     * every individual name is legal — the failure belongs to the item's
+     * position in the tree, not to its name.
+     */
+    fun checkPath(path: CloudPath, capabilities: ProviderCapabilities): ItemStatusReason? {
+        val limit = capabilities.maxPathLength ?: return null
+        return if (path.toString().length > limit) ItemStatusReason.CONFLICT_ILLEGAL_NAME else null
     }
 }

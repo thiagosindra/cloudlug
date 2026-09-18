@@ -97,7 +97,7 @@ abstract class ProviderContractTest {
     }
 
     @Test
-    fun `enumeration resumes from a cursor without repeating earlier objects`() = runTest {
+    fun `enumeration resumes from an object id without repeating earlier objects`() = runTest {
         val provider = newProvider()
         val root = rootFolder(provider)
         val parent = seedFolder(provider, root, "tree")
@@ -106,7 +106,8 @@ abstract class ProviderContractTest {
         val all = provider.enumerate(account(provider), selectionOf(provider, parent)).toList()
         val resumed = provider.enumerate(
             account(provider),
-            selectionOf(provider, parent).copy(resumeCursor = all[2].id.opaqueId),
+            selectionOf(provider, parent),
+            resumeAfter = all[2].id,
         ).toList()
 
         assertEquals(all.drop(3).map { it.id }, resumed.map { it.id })
@@ -302,7 +303,7 @@ abstract class ProviderContractTest {
                 mimeType = null,
             )
         }
-        return CloudSelection(account(provider), objects)
+        return CloudSelection.of(account(provider), objects)
     }
 
     protected suspend fun upload(
@@ -349,6 +350,3 @@ abstract class ProviderContractTest {
     }
 }
 
-/** Selection with a replaced cursor, for the resume test. */
-private fun CloudSelection.copy(resumeCursor: String?) =
-    CloudSelection(accountId = accountId, roots = roots, resumeCursor = resumeCursor)

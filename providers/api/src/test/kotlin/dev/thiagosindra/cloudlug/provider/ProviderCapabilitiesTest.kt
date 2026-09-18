@@ -30,6 +30,8 @@ class ProviderCapabilitiesTest {
         maxUploadChunkBytes = maxChunk,
         illegalNameCharacters = setOf('/'),
         maxNameLength = 255,
+        maxPathLength = null,
+        disallowsTrailingSpaceOrDot = false,
     )
 
     @Test
