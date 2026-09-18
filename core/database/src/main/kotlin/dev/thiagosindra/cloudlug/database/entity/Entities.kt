@@ -1,5 +1,10 @@
 package dev.thiagosindra.cloudlug.database.entity
 
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.Index
+import androidx.room.PrimaryKey
 import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CacheChunkId
 import dev.thiagosindra.cloudlug.model.CacheChunkStatus
@@ -30,8 +35,9 @@ import java.time.Instant
  */
 
 /** A transfer: two accounts, one enclosing destination folder, one manifest (spec §12.1). */
+@Entity(tableName = "transfers")
 data class TransferEntity(
-    val id: TransferId,
+    @PrimaryKey val id: TransferId,
     val createdAt: Instant,
     val updatedAt: Instant,
     val sourceProvider: ProviderType,
@@ -67,6 +73,7 @@ data class TransferEntity(
      * progress by file count and shows bytes as "at least", because
      * [totalBytes] is a lower bound.
      */
+    @ColumnInfo(defaultValue = "0")
     val unknownSizeFiles: Int = 0,
     val lastErrorCode: String? = null,
     val lastErrorMessage: String? = null,
@@ -96,8 +103,26 @@ data class TransferEntity(
 }
 
 /** One object in the manifest: a file, a folder, or something that cannot move (spec §12.2). */
+@Entity(
+    tableName = "transfer_items",
+    foreignKeys = [
+        ForeignKey(
+            entity = TransferEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["transferId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index("transferId"),
+        // §19.2 looks an item up by its source object across transfers, and
+        // §11 deduplicates by it within one; both are hot enough to index.
+        Index("sourceObjectId"),
+        Index(value = ["transferId", "status"]),
+    ],
+)
 data class TransferItemEntity(
-    val id: TransferItemId,
+    @PrimaryKey val id: TransferItemId,
     val transferId: TransferId,
     val sourceObjectId: String,
     /** Revision recorded at enumeration; compared again before download (spec §20.6). */
@@ -138,8 +163,20 @@ data class TransferItemEntity(
 )
 
 /** One cached byte range on local storage (spec §12.3, §15.3). */
+@Entity(
+    tableName = "cache_chunks",
+    foreignKeys = [
+        ForeignKey(
+            entity = TransferItemEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["transferItemId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("transferItemId"), Index(value = ["transferItemId", "status"])],
+)
 data class CacheChunkEntity(
-    val id: CacheChunkId,
+    @PrimaryKey val id: CacheChunkId,
     val transferItemId: TransferItemId,
     val offset: Long,
     val length: Long,
@@ -168,8 +205,9 @@ data class CacheChunkEntity(
  * Refresh tokens and any other long-lived secret live in Keystore-protected
  * storage, never here (spec §8.3).
  */
+@Entity(tableName = "accounts", indices = [Index(value = ["provider", "providerAccountId"], unique = true)])
 data class AccountEntity(
-    val id: AccountId,
+    @PrimaryKey val id: AccountId,
     val provider: ProviderType,
     val providerAccountId: String,
     val displayName: String? = null,

@@ -410,3 +410,104 @@ manifest to resume.
 **What changes it.** If §10 were revised to create the folder lazily, at the
 first item that needs a destination parent, `start()` would lose its only
 responsibility and should be folded back into `run()`.
+
+---
+
+## ADR-0021 — Room runs on the JVM, so the transaction tests need no device
+
+**Question.** §33 v0.2 asks for Room behind the DAO interfaces and for the
+transactional tests to run on the JVM "if the current Room version allows an
+in-memory database on a plain JVM, otherwise as instrumented tests". Room is an
+androidx library; historically it ran only on Android.
+
+**Decision.** Room 2.8's KMP artifacts (`room-runtime-jvm`) plus
+`androidx.sqlite:sqlite-bundled` run on a plain JVM, so the tests are ordinary
+JUnit tests under `./gradlew test`. No emulator, no instrumentation, and the
+rollback behaviour the engine depends on is checked on every CI run rather than
+only when someone attaches a device.
+
+`:core:database` therefore stays a Kotlin/JVM module rather than becoming an
+Android library. Gradle variant resolution gives `:app` the `-android` variant
+of room-runtime transitively, which is what the AAR-metadata check reports, so
+the app is not carrying a desktop SQLite by accident.
+
+Both implementations answer to one `TransactionContractTest`. ADR-0002 claimed
+that swapping the in-memory store for Room could not change behaviour; that is
+only worth something if both are held to the same assertions instead of two
+suites that drift.
+
+`BundledSQLiteDriver` is used on Android as well as on the JVM, so the app and
+the tests exercise the same SQLite build rather than whichever version a given
+device ships.
+
+**What changes it.** If a future Room release drops JVM support, these become
+instrumented tests and CI needs an emulator.
+
+---
+
+## ADR-0022 — The UI drives a controller, not the engine
+
+**Question.** `TransferEngine.run` suspends until the transfer settles or parks.
+A Compose screen cannot call it: the work has to outlive the screen that started
+it, be observable while it runs, and be pausable from a button press *during*
+the run. §35 shows a "Transfer Controller" between the UI and the engine but
+does not say what it holds.
+
+**Decision.** `TransferController` owns the `CoroutineScope` and the map of
+in-flight jobs. `start` launches and returns; `pause` and `cancel` cancel the
+job and then ask the engine to record the state. The engine keeps no scope of
+its own, which is what lets it stay a plain suspending object that tests drive
+directly.
+
+`start` is idempotent while a run is in flight, because pressing Start twice or
+a screen being recreated on rotation must not put two workers on one transfer —
+they would double-count progress and race on the same upload sessions.
+
+Everything observable comes from the database rather than from the controller,
+because the database is authoritative (§2.4): a transfer interrupted by process
+death is resumed by calling `start` again, and the UI sees the same rows either
+way.
+
+**What changes it.** §17's UIDT and WorkManager scheduling (v0.5). The
+controller's scope is the thing a `JobService` will replace; the interface it
+presents to the UI should not have to change when it does.
+
+---
+
+## ADR-0023 — androidx is pinned to what compiles against SDK 36
+
+**Question.** The newest androidx releases declare a `compileSdk` 37 floor in
+their AAR metadata. AGP 8.13 refuses to compile against 37, and the AGP 9 line
+that would allow it is a major version with its own migration.
+
+**Decision.** Pin Compose, navigation, lifecycle, activity, core-ktx and
+`hilt-navigation-compose` to the newest versions that still compile against 36,
+and stay on AGP 8.13 with Hilt 2.57.2. Nothing in the spec asks for a bleeding
+edge toolchain, and v0.2's job is to prove the shell works, not to absorb an AGP
+major upgrade at the same time.
+
+**What changes it.** Moving to AGP 9, which Hilt 2.60+ already requires. Worth
+doing on its own, before a milestone that needs a library only available above
+the SDK 36 line.
+
+---
+
+## ADR-0024 — `listChildren` is a separate call from `enumerate`
+
+**Question.** §9 says the v1 source picker is "an in-app browser built on the
+provider's enumeration API". §5 offers `enumerate`, which walks a selection
+depth-first through every descendant, and `lookupDestination`, which answers
+"what is called this?". Neither can back a browser: enumerating an account root
+would walk the entire account before the first row could be drawn.
+
+**Decision.** Add `CloudProvider.listChildren(account, parent): Flow<CloudObject>`
+— one level, paged internally, emitted as pages arrive. The picker is still
+built on the provider's own API, as §9 requires; it is just a different call
+from the one the manifest builder uses.
+
+This is an addition to §5 rather than a reinterpretation of it: nothing that
+existed changed meaning, and the transfer engine does not use it.
+
+**What changes it.** Nothing foreseen. A provider with no way to list a folder's
+children could not back a browser at all, and would need a picker of its own —
+which is exactly the Google Picker problem §8.2 describes.

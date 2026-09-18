@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Spec §15.2 and §28: the chunk cache and any credential store are excluded from
+  backup. Chunks are large, transient and meaningless off-device; credentials are
+  Keystore-wrapped and must never leave it.
+-->
+<full-backup-content>
+    <exclude domain="file" path="cloudlug-cache/" />
+    <exclude domain="file" path="credentials/" />
+    <exclude domain="sharedpref" path="credentials.xml" />
+</full-backup-content>

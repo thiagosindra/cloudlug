@@ -1,15 +1,36 @@
 # Version catalog for CloudLug.
 #
-# Only the JVM half of the stack from spec §3 is present. Android-side
-# dependencies (AGP, Compose, Room, Hilt, AppAuth, OkHttp, ExifInterface) land in
-# v0.2 — see docs/decisions.md ADR-0002 and ADR-0003.
+# v0.2 adds the Android half of the stack from spec §3: AGP, Room, Hilt and
+# Compose. AppAuth, OkHttp and ExifInterface arrive with the first real adapter
+# in v0.3 — see docs/decisions.md.
 
 [versions]
 kotlin = "2.2.20"
+ksp = "2.2.20-2.0.4"
 coroutines = "1.10.2"
 serialization = "1.8.1"
 junit = "5.11.4"
 junitPlatform = "1.11.4"
+
+agp = "8.13.2"
+# The androidx versions below are the newest that still compile against SDK 36.
+# Anything later declares a compileSdk 37 floor in its AAR metadata, which AGP
+# 8.13 refuses — see docs/decisions.md ADR-0023.
+compileSdk = "36"
+minSdk = "26"
+targetSdk = "36"
+
+room = "2.8.5"
+# Room 2.8.5 resolves androidx.sqlite 2.6.2; the bundled driver must match so
+# the JVM tests and the Android build run the same SQLite.
+sqlite = "2.6.2"
+hilt = "2.57.2"
+hiltNavigation = "1.2.0"
+composeBom = "2025.06.01"
+activityCompose = "1.12.0"
+navigationCompose = "2.9.5"
+lifecycle = "2.9.1"
+coreKtx = "1.16.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -18,6 +39,34 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junitPlatform" }
 
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
+
+hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
+hilt-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }
+hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigation" }
+
+androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+room = { id = "androidx.room", version.ref = "room" }
+hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }

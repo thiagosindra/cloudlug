@@ -20,7 +20,7 @@ import kotlinx.coroutines.flow.Flow
  * behaviour (docs/decisions.md ADR-0002).
  *
  * Signatures are Room-shaped — suspend functions for writes, Flow for
- * observation — so the v0.2 implementations can be @Dao interfaces with
+ * observation — so the Room implementations in `room/` are @Dao interfaces with
  * @Query/@Insert/@Update annotations and no other change.
  */
 
@@ -59,10 +59,9 @@ interface TransferItemDao {
 
     /**
      * The idempotency record of spec §19.2: every completed item across all
-     * transfers that moved this source object from this account.
-     *
-     * TODO(§33 v0.2): in Room this is a join against the transfer table on
-     * `sourceAccountId`; it is a query, not a second table.
+     * transfers that moved this source object from this account. In Room this
+     * is a join against the transfer table on `sourceAccountId`; it is a query,
+     * not a second table.
      */
     suspend fun findCompletedForSourceObject(
         sourceAccountId: AccountId,

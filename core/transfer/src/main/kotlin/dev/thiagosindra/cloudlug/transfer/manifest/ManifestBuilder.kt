@@ -22,12 +22,24 @@ import java.util.UUID
 data class ManifestSummary(
     val folders: Int = 0,
     val files: Int = 0,
+    /** Sum of known sizes only; see [unknownSizes] (spec §11). */
     val bytes: Long = 0,
     val unsupported: Int = 0,
     val conflicts: Int = 0,
+    /**
+     * Files whose size is not known until export (spec §11, §20.1).
+     *
+     * The review step has to say so: §24.2 asks the user to confirm the size
+     * before starting, and presenting a lower bound as the total would be a
+     * quiet understatement of what the transfer is about to move.
+     */
+    val unknownSizes: Int = 0,
 ) {
     /** Items that will actually move bytes. */
     val transferableFiles: Int get() = files - unsupported - conflicts
+
+    /** True when [bytes] is a lower bound rather than the whole job. */
+    val bytesAreLowerBound: Boolean get() = unknownSizes > 0
 }
 
 /**
@@ -213,6 +225,7 @@ class ManifestBuilder(
                 else -> summary.copy(
                     files = summary.files + delta,
                     bytes = summary.bytes + delta * (item.size ?: 0L),
+                    unknownSizes = summary.unknownSizes + if (item.size == null) delta else 0,
                     unsupported = summary.unsupported +
                         if (status == TransferItemStatus.SKIPPED_UNSUPPORTED) delta else 0,
                     conflicts = summary.conflicts +

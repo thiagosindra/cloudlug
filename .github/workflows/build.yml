@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   jvm:
-    name: JVM modules (unit tests)
+    name: JVM modules (no Android SDK)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,12 +24,79 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build and test
-        run: ./gradlew build --stacktrace
+      # Named module by module on purpose. A bare `./gradlew test` would resolve
+      # :app:testDebugUnitTest and need an SDK; listing the JVM modules keeps
+      # this job proving what it claims — that the engine, the Room layer
+      # included, builds and passes with no Android SDK anywhere.
+      - name: Test the JVM modules
+        run: |
+          ./gradlew --stacktrace \
+            :core:model:test \
+            :core:database:test \
+            :core:hashing:test \
+            :core:storage:test \
+            :core:transfer:test \
+            :providers:api:test \
+            :providers:fake:test
 
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports
+          name: test-reports-jvm
           path: "**/build/reports/tests/**"
+
+  android:
+    name: Android modules (:app and feature/*)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # `packages` is set explicitly because the action's default list still
+      # contains the obsolete `tools` package, which no longer exists in the SDK
+      # repository — sdkmanager exits 1 with "Failed to find package 'tools'"
+      # before Gradle runs at all. Naming what the build actually needs also
+      # pins the platform rather than relying on the runner image.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # `build` rather than `assembleDebug`: it compiles every module, runs the
+      # JVM tests and lints the Android ones, which is the acceptance criterion
+      # for §33 v0.2.
+      - name: Build everything
+        run: ./gradlew build --stacktrace
+
+      # The committed Room schema must match what the annotations generate. A
+      # dirty tree here means someone changed an entity without exporting the
+      # schema, which is exactly the review-time signal exportSchema is for.
+      - name: Check the exported Room schema is committed
+        run: |
+          if [ -n "$(git status --porcelain core/database/schemas)" ]; then
+            echo "The exported Room schema differs from the committed one:"
+            git --no-pager diff -- core/database/schemas
+            exit 1
+          fi
+
+      - name: Upload the debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-android
+          path: "**/build/reports/**"
