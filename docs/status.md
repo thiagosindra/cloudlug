@@ -39,8 +39,8 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 | `:feature:transfer-details` | §24.3: live progress, current file, per-item outcomes, §22 controls | — |
 | `:app` | `MainActivity`, navigation, Hilt graph: Room (opened here — ADR-0025), `filesDir` cache, ConnectivityManager, StatFs, two fake providers, debug crash reporter | 2 instrumented |
 
-**273 JVM tests, 0 failures**, plus 2 instrumented tests that have not yet run
-(see "What is verified, and on what"). `allWarningsAsErrors` is on everywhere.
+**273 JVM tests, 0 failures**, plus 2 instrumented tests passing on an emulator
+in CI. `allWarningsAsErrors` is on everywhere.
 
 ## What is verified, and on what
 
@@ -61,14 +61,14 @@ held to one contract shared with the in-memory store.
 `NoPlatformSpecificRoomApiTest` now fails the build if this module's main source
 set names a Room construction API again.
 
-**Written, but not yet verified anywhere.** `FirstRunSmokeTest` launches
-`MainActivity` against the real `CloudLugApplication`, so Hilt builds the real
-graph and Room opens the real database, then asserts the app is alive and the
-database file exists on disk. That is the exact path that crashed — but the test
-has never executed. The CI emulator failed to start on five consecutive runs,
-most recently because the runner was 241 MB short of the disk the AVD needs for
-its userdata partition, and the app never installed. Until a run goes green,
-treat this test as unexecuted code, not as coverage.
+**Verified on an emulator, in CI.** `FirstRunSmokeTest` launches `MainActivity`
+against the real `CloudLugApplication`, so Hilt builds the real graph and Room
+opens the real database, then asserts the app reaches RESUMED and that all four
+of Room's tables exist when read back through a second connection. This is the
+exact path that crashed. It asserts the schema rather than the file's size
+because Room journals in WAL mode on Android: a newly created schema lives in
+`cloudlug.db-wal` and the main file stays zero bytes until a checkpoint, so the
+first version of this assertion failed against a perfectly healthy app.
 
 **Verified against the built artifact.** The debug APK's only
 `RoomDatabase$Builder` constructor references are the Android ones; the crashing
