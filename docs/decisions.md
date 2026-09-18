@@ -573,3 +573,54 @@ a device and named "whether the Hilt graph constructs" and "whether
 `BundledSQLiteDriver` opens a database in an app data directory" as the first
 things to check — and both were exactly what broke. Writing the risk down is not
 the same as testing it.
+
+## ADR-0026 — A provider names its own root
+
+**Status.** Accepted in v0.2.2.
+
+**Context.** The wizard's picker was empty on a real device. Both providers held
+a full tree, `./gradlew build` was green, 273 JVM tests passed and the emulator
+smoke test passed, so nothing anywhere reported a problem. The user could choose
+a source and a destination and then had nothing to select, which made **Next**
+permanently unreachable.
+
+`listChildren(account, parent)` takes a `CloudObjectId`, and its own KDoc talks
+about "opening an account root" — but `CloudProvider` offered no way to obtain
+one. Every ID the API hands back is discovered from a previous call, and the
+first call has nothing to start from. So `NewTransferViewModel` invented the
+literal string `"root"`, while `FakeCloudStorage` stored top-level objects under
+`null`. The two never matched, and `childrenOf("root")` returned an empty list
+for every provider, at every step, always.
+
+**Decision.** `CloudProvider` gains `fun rootOf(account: AccountId):
+CloudObjectId`. Root is spelled differently by every provider — Dropbox uses the
+empty string, Drive the literal `"root"` — so only the adapter can answer it. It
+takes an `AccountId` because a provider may expose more than one root per
+account, such as a personal and a team space.
+
+`FakeCloudStorage` now folds `ROOT_ID` and `null` to one canonical value on
+every write and every lookup, so seeding with no parent and seeding under
+`rootOf` reach the same place.
+
+**Why the tests did not catch it.** `ProviderContractTest` had no `listChildren`
+coverage at all — it was added in v0.2 for the wizard (ADR-0024) and the
+contract suite was never extended to match. Worse, the suite's `rootFolder()`
+hook seeds into a folder *named* `"root"`, so even a test that looked like it
+exercised the root never touched the account root. The contract now asserts that
+an object seeded directly under `rootOf` appears in `listChildren(rootOf)`, and
+that `listChildren` returns one level rather than a subtree. Both now bind the
+Dropbox adapter in v0.3.
+
+**The second defect, which hid the first.** `childrenOfRoot` wrapped the
+provider call in `runCatching { … }.getOrElse { emptyList() }`. A provider that
+threw and an account with no files produced the same screen, so the UI could not
+have reported this even in principle. Failures now surface as a message, and a
+list with no rows says why it is empty instead of drawing nothing.
+
+**The lesson, and it is the same one as ADR-0025 from the other side.** v0.2.1
+added an emulator test that launches the app and opens the database, and it
+passed — while the app was unusable. "It starts" is not "it works". A smoke test
+proves the process survives construction; only driving the actual user journey
+proves the journey exists. `docs/status.md` said in as many words that the
+wizard had never been driven end to end, and that is exactly where the defect
+was.

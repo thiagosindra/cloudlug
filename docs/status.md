@@ -1,4 +1,4 @@
-# Status — v0.2.1 (first-run fixes)
+# Status — v0.2.2 (wizard picker)
 
 What exists, what is compiled, what is verified, and what v0.3 needs from you.
 Milestone definitions are in spec §33; design decisions are in
@@ -75,8 +75,15 @@ first version of this assertion failed against a perfectly healthy app.
 three-argument signature appears in no dex. `DebugCrashReporter` is in the debug
 APK and absent from release.
 
-**Still not verified.** The screens themselves: no test asserts that anything
-*renders correctly*, only that composing them does not throw. Layout,
+**Still not verified, and it cost a release.** v0.2.1 shipped a wizard whose
+picker was empty on a device (ADR-0026) while every check above was green: the
+smoke test proved the app starts, not that it works. The contract suite now
+covers `listChildren` at the account root, but no test drives the wizard from
+step 1 to a started transfer, which is the gap that would have caught it
+directly.
+
+No test asserts that anything *renders correctly*, only that composing them does
+not throw. Layout,
 readability and the §24.3 hop indicator have been seen by nobody. The wizard has
 never been driven end to end on a device. Everything below `:app` remains
 JVM-tested only.

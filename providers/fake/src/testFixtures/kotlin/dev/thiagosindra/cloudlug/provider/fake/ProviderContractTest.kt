@@ -65,6 +65,42 @@ abstract class ProviderContractTest {
     }
 
     @Test
+    fun `listChildren at the account root shows objects seeded directly under it`() = runTest {
+        val provider = newProvider()
+        val account = account(provider)
+        val top = seedFolder(provider, provider.rootOf(account), "top level")
+
+        val children = provider.listChildren(account, provider.rootOf(account)).toList()
+
+        // The picker's first call is always this one. v0.2 shipped a wizard
+        // that invented its own root ID, so this returned nothing for every
+        // provider and no file could be chosen (ADR-0026).
+        assertTrue(
+            children.any { it.id == top },
+            "listChildren(rootOf(account)) must include an object seeded under the root, " +
+                "but returned ${children.map { it.name }}",
+        )
+    }
+
+    @Test
+    fun `listChildren returns one level, not a subtree`() = runTest {
+        val provider = newProvider()
+        val account = account(provider)
+        val top = seedFolder(provider, provider.rootOf(account), "top level")
+        val nested = seedFolder(provider, top, "nested")
+        seedFile(provider, nested, "deep.txt", "deep".toByteArray())
+
+        val children = provider.listChildren(account, provider.rootOf(account)).toList()
+
+        // A picker that gets a whole subtree cannot draw a folder row, and §9
+        // has the user descend one level at a time.
+        assertTrue(
+            children.none { it.id == nested },
+            "listChildren must not descend: ${children.map { it.name }}",
+        )
+    }
+
+    @Test
     fun `enumerate emits parents before children`() = runTest {
         val provider = newProvider()
         val root = rootFolder(provider)

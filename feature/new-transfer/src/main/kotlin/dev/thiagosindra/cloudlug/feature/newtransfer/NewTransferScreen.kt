@@ -112,6 +112,9 @@ fun NewTransferScreen(
                     )
 
                     WizardStep.PICK_SOURCE -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        if (state.sourceChildren.isEmpty()) {
+                            item { EmptyNotice(state, "There is nothing in this account to transfer.") }
+                        }
                         items(state.sourceChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
                                 headlineContent = { SingleLine(obj.name) },
@@ -137,6 +140,9 @@ fun NewTransferScreen(
                     }
 
                     WizardStep.PICK_DESTINATION -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        if (state.destinationChildren.isEmpty()) {
+                            item { EmptyNotice(state, "This account has no folder to transfer into.") }
+                        }
                         items(state.destinationChildren, key = { it.id.opaqueId }) { obj ->
                             ListItem(
                                 headlineContent = { SingleLine(obj.name) },
@@ -209,6 +215,24 @@ private fun ProviderList(
             )
         }
     }
+}
+
+/**
+ * A list that draws nothing looks the same whether it is loading, empty or
+ * broken. That ambiguity is how ADR-0026's empty root survived to a device:
+ * the picker had no files and said nothing about it.
+ */
+@Composable
+private fun EmptyNotice(state: WizardState, message: String) {
+    Text(
+        text = when {
+            state.busy -> "Loading\u2026"
+            state.error != null -> "Nothing to show."
+            else -> message
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(16.dp),
+    )
 }
 
 /** Step 5: everything §24.2 asks the user to confirm before any byte moves. */
