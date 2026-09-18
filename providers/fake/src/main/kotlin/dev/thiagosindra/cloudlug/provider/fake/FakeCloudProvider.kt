@@ -21,9 +21,11 @@ import dev.thiagosindra.cloudlug.provider.UploadProgress
 import dev.thiagosindra.cloudlug.provider.UploadRequest
 import dev.thiagosindra.cloudlug.provider.UploadSession
 import dev.thiagosindra.cloudlug.hashing.Hashers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import java.time.Instant
+import kotlin.time.Duration
 
 /**
  * Thrown when [FakeCloudProvider.interruptProcess] simulates the app being
@@ -54,6 +56,23 @@ class FakeCloudProvider(
     private val totalQuotaBytes: Long? = null,
     private val enumerationPageSize: Int = 100,
 ) : CloudProvider {
+
+    /**
+     * How long one source read takes (spec §31.3).
+     *
+     * Required, not a convenience. With no delay a whole file moves inside a
+     * single scheduler tick, so every pause, resume and cancel lands on a state
+     * boundary — precisely the case §22 does not need help with. Mid-file
+     * behaviour cannot be tested at all without a way to stop the clock partway
+     * through an object.
+     *
+     * Settable rather than a constructor parameter so a test can slow one side
+     * only, or start slow and speed up once it has the position it wants.
+     */
+    var readDelay: Duration = Duration.ZERO
+
+    /** How long one destination chunk upload takes (spec §31.3). */
+    var uploadChunkDelay: Duration = Duration.ZERO
 
     private val injections = mutableListOf<FailureInjection>()
     private val sessions = linkedMapOf<String, PendingUpload>()
@@ -222,6 +241,7 @@ class FakeCloudProvider(
     }
 
     override suspend fun uploadChunk(session: UploadSession, chunk: Chunk): UploadProgress {
+        if (uploadChunkDelay > Duration.ZERO) delay(uploadChunkDelay)
         record(FailureInjection.Operation.UPLOAD_CHUNK)
         val pending = sessions[session.id]
             ?: throw CloudException(CloudErrorKind.UPLOAD_SESSION_EXPIRED, "unknown session", code = "expired")
@@ -324,6 +344,9 @@ class FakeCloudProvider(
         private val dropAfter: Long? = disconnectAfter()
 
         override suspend fun read(destination: ByteArray, offset: Int, length: Int): Int {
+            // Before the outcome, not after: the wire time is spent whether the
+            // read succeeds or the connection then drops.
+            if (readDelay > Duration.ZERO) delay(readDelay)
             failIfInjected(FailureInjection.Operation.READ)
             if (dropAfter != null && position >= dropAfter) {
                 throw CloudException(CloudErrorKind.TRANSIENT_NETWORK, "connection reset", code = "reset")

@@ -113,10 +113,18 @@ counter (§11).
 
 ## Known gaps
 
-1. **§31.3's slow-source and slow-destination injections are now normative in
-   v1.3 and still missing.** Until they exist, mid-file pause and resume cannot
-   be tested — only the state transitions around them. This is the largest
-   spec-conformance gap in the tree.
+1. ~~**§31.3's slow-source and slow-destination injections.**~~ Landed in
+   v0.3 Step 0: `FakeCloudProvider.readDelay` and `uploadChunkDelay` make a
+   file take virtual time, so `MidFileInterruptionTest` pauses, resumes and
+   cancels **partway through an object** rather than at a state boundary.
+
+   They found a real §22.2 defect on their first run. `cancelItem` aborts the
+   item's upload session while the worker is still mid-file, so the worker's
+   next call threw `UploadSessionRestartException` past both of `run()`'s
+   handlers, killed the transfer and left every remaining item `PENDING` with
+   the transfer stuck in `RUNNING`. Cancelling one file stopped all of them.
+   Unreachable without a slow source, which is exactly why v1.3 made these
+   injections normative.
 2. **No background execution.** §17's UIDT on API 34+ and the WorkManager
    fallback below it are not implemented. A transfer runs in an
    application-scoped coroutine and dies with the process; the database makes
