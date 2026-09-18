@@ -133,14 +133,21 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # Without hardware acceleration the emulator boots by software rendering
-      # and will not finish inside any reasonable timeout. Three boot timeouts
-      # were diagnosed blind before this step existed; if the next one fails,
-      # this says whether acceleration was actually available.
-      - name: Report virtualisation support
+      # An x86_64 system image cannot fall back to software emulation: without
+      # KVM the emulator prints "x86_64 emulation currently requires hardware
+      # acceleration" and exits immediately. That is invisible downstream — the
+      # device simply never appears, and the action polls a dead port until it
+      # times out. Three runs were misdiagnosed as slow boot on exactly that
+      # signature, so assert acceleration here and fail in seconds with a
+      # readable reason rather than in fifteen minutes with none.
+      - name: Require hardware acceleration
         run: |
           echo "CPU virtualisation flags: $(grep -c -E '(vmx|svm)' /proc/cpuinfo || echo 0)"
-          ls -l /dev/kvm || echo "NO /dev/kvm — the emulator cannot be accelerated"
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::No /dev/kvm on this runner. The x86_64 emulator cannot start."
+            exit 1
+          fi
+          ls -l /dev/kvm
 
       - name: Run the smoke test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
@@ -159,7 +166,7 @@ jobs:
           arch: x86_64
           force-avd-creation: false
           disable-animations: true
-          emulator-boot-timeout: 900
+          emulator-boot-timeout: 300
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
 
