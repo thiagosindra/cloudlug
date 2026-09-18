@@ -74,11 +74,19 @@ class NewTransferJourneyTest {
     /** Waits for [text] to exist, then returns it for clicking. */
     private fun node(text: String): SemanticsNodeInteraction {
         awaitText(text)
-        return compose.onNodeWithText(text)
+        return compose.onNodeWithText(text, useUnmergedTree = true)
     }
 
     /**
      * The engine works off the main thread, so every step is awaited.
+     *
+     * Everything here reads the **unmerged** semantics tree. Matching the
+     * merged tree found nothing while the screen plainly held the text: the
+     * failure that established this reported `Never found "New Transfer". On
+     * screen: ... | CloudLug | New Transfer`, the two halves disagreeing
+     * because the diagnosis read the unmerged tree and the wait did not. That
+     * is the observation; the reason Material3's FAB does not surface its label
+     * to a merged-tree text match is not something this test needs to settle.
      *
      * On timeout it reports every string on screen, on one line. An earlier
      * version printed the whole semantics tree, which was the right idea and
@@ -89,7 +97,7 @@ class NewTransferJourneyTest {
     private fun awaitText(text: String, timeoutMillis: Long = 20_000) {
         try {
             compose.waitUntil(timeoutMillis) {
-                compose.onAllNodesWithText(text, substring = true)
+                compose.onAllNodesWithText(text, substring = true, useUnmergedTree = true)
                     .fetchSemanticsNodes()
                     .isNotEmpty()
             }
