@@ -30,6 +30,7 @@ import dev.thiagosindra.cloudlug.transfer.pipeline.RetryExecutor
 import dev.thiagosindra.cloudlug.transfer.pipeline.StorageMonitor
 import dev.thiagosindra.cloudlug.transfer.pipeline.TransferHoldException
 import dev.thiagosindra.cloudlug.transfer.policy.RetryPolicy
+import kotlinx.coroutines.CancellationException
 import java.time.Clock
 import java.time.ZoneId
 
@@ -197,6 +198,11 @@ class TransferEngine(
             try {
                 val parent = resolveParent(transfer, destination, parents, current)
                 worker.run(transfer, current, source, destination, parent)
+            } catch (cancellation: CancellationException) {
+                // Pause cancels the job (§22.1). That must keep unwinding, and
+                // must be re-thrown before the suspending lookup below, which
+                // would itself throw once the coroutine is cancelled.
+                throw cancellation
             } catch (hold: TransferHoldException) {
                 repository.transitionTransfer(
                     transferId,
@@ -205,9 +211,24 @@ class TransferEngine(
                     errorMessage = hold.message,
                 )
                 return hold.status
-            } catch (error: CloudException) {
+            } catch (error: Exception) {
+                // §22.2: `cancelItem` settles the item and aborts its upload
+                // session while this worker is still mid-file, so the worker's
+                // next call fails — an aborted session reports "expired". That
+                // throw must not end the transfer. The user asked for one file
+                // to stop, not all of them, and the rest are untouched.
+                //
+                // Before this check, cancelling the file *in flight* threw
+                // UploadSessionRestartException past both handlers, killed the
+                // run and left every remaining item PENDING with the transfer
+                // stuck in RUNNING. Only reachable with a slow source, which is
+                // why §31.3 requires one.
+                val settledMeanwhile = repository.findItem(current.id)?.status?.isTerminal == true
+                if (settledMeanwhile) continue
+
                 // The retry policy already decided this is permanent for the item;
                 // the transfer carries on so it can finish COMPLETED_WITH_ISSUES.
+                if (error !is CloudException) throw error
                 repository.transitionItem(current.id, TransferItemStatus.FAILED, ItemStatusReason.ERROR_PERMANENT) {
                     it.copy(lastErrorCode = error.code ?: error.kind.name, lastErrorMessage = error.message)
                 }
