@@ -16,7 +16,7 @@ import org.junit.runner.RunWith
 
 /**
  * Drives the §24.2 wizard the way a person does, from the home screen to a
- * running transfer.
+ * completed, verified transfer.
  *
  * This exists because v0.2.1 shipped a wizard whose picker was empty on a real
  * device while every check was green. `FirstRunSmokeTest` proved the app
@@ -68,7 +68,18 @@ class NewTransferJourneyTest {
         awaitText("5. Review", timeoutMillis = 60_000)
         node("Start transfer").performClick()
 
-        awaitText("Transfer started.")
+        // Starting replaces the wizard with the transfer's detail screen —
+        // MainActivity pops NEW_TRANSFER so that backing out of a started
+        // transfer reaches home rather than step 5 — so the wizard's own
+        // "Transfer started." is never drawn. §24.3 is where a started
+        // transfer is observable.
+        awaitText("Dropbox -> Google Drive", timeoutMillis = 30_000)
+
+        // And it does not merely start. The engine runs to completion inside
+        // the app, with every item verified at the destination per §21, which
+        // until now had only ever been shown in JVM tests.
+        awaitText("Completed", timeoutMillis = 60_000)
+        awaitText("verified by destination hash")
     }
 
     /** Waits for [text] to exist, then returns it for clicking. */

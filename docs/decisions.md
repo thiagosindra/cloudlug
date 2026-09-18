@@ -366,6 +366,8 @@ database, not error handling.
 
 ## ADR-0019 — The block-list hasher checkpoints in constant space
 
+**Status.** Ratified — v1.3 §19.4 states that the block hash checkpoints as the outer streaming hasher's state plus the current partial block's inner state, not a list of block digests. v1.2 described the state; it did not intend a representation that grows with the object.
+
 **Question.** §19.4 describes the checkpointable state of the Dropbox block hash
 as "the list of completed block digests at 32 bytes per 4 MiB". Taken literally,
 a 100 GiB object would carry roughly 800 KB of checkpoint, rewritten on every
@@ -388,6 +390,8 @@ hold, and the flat list would be the only option.
 ---
 
 ## ADR-0020 — `READY -> RUNNING` is a method, not an implicit step
+
+**Status.** Ratified — v1.3 §10 and §35 separate `start()` from `run()`: enclosing-folder creation fails with zero bytes moved, and a failure inside `run()` leaves a resumable manifest.
 
 **Question.** v1.2 §10 attaches enclosing-folder creation to the
 `READY -> RUNNING` transition. The engine had no way to perform that transition
@@ -414,6 +418,8 @@ responsibility and should be folded back into `run()`.
 ---
 
 ## ADR-0021 — Room runs on the JVM, so the transaction tests need no device
+
+**Status.** Ratified — v1.3 keeps Room's transaction tests on the JVM. Revised in v0.2.1: `:app` supplies the Android builder and `AndroidSQLiteDriver`, so the claim of one shared SQLite build no longer holds (ADR-0025).
 
 **Question.** §33 v0.2 asks for Room behind the DAO interfaces and for the
 transactional tests to run on the JVM "if the current Room version allows an
@@ -452,6 +458,8 @@ instrumented tests and CI needs an emulator.
 
 ## ADR-0022 — The UI drives a controller, not the engine
 
+**Status.** Ratified — v1.3 §35 gives the running coroutine to the Transfer Controller and leaves the engine scope-free.
+
 **Question.** `TransferEngine.run` suspends until the transfer settles or parks.
 A Compose screen cannot call it: the work has to outlive the screen that started
 it, be observable while it runs, and be pausable from a button press *during*
@@ -481,6 +489,8 @@ presents to the UI should not have to change when it does.
 
 ## ADR-0023 — androidx is pinned to what compiles against SDK 36
 
+**Status.** Ratified — recorded in the v1.3 changelog without a text change. The pins stand until `compileSdk` moves.
+
 **Question.** The newest androidx releases declare a `compileSdk` 37 floor in
 their AAR metadata. AGP 8.13 refuses to compile against 37, and the AGP 9 line
 that would allow it is a major version with its own migration.
@@ -498,6 +508,8 @@ the SDK 36 line.
 ---
 
 ## ADR-0024 — `listChildren` is a separate call from `enumerate`
+
+**Status.** Ratified — v1.3 §5 adds `listChildren`, because a picker browses one level at a time and `enumerate` walks a subtree depth-first. They are different operations.
 
 **Question.** §9 says the v1 source picker is "an in-app browser built on the
 provider's enumeration API". §5 offers `enumerate`, which walks a selection
@@ -520,6 +532,8 @@ which is exactly the Google Picker problem §8.2 describes.
 ---
 
 ## ADR-0025 — A JVM module never names a platform-specific API
+
+**Status.** Accepted in v0.2.1.
 
 **Question.** `:core:database` is a Kotlin/JVM module that ships inside an
 Android APK. Room publishes `room-runtime-jvm` and `room-runtime-android` as
