@@ -22,7 +22,7 @@ class ManifestBuilderTest {
         vararg roots: dev.thiagosindra.cloudlug.provider.CloudObjectId,
         destinationCapabilities: dev.thiagosindra.cloudlug.provider.ProviderCapabilities =
             harness.destination.capabilities,
-        rootPathResolver: (dev.thiagosindra.cloudlug.provider.CloudObject) -> CloudPath = { CloudPath.of(it.name) },
+        selection: dev.thiagosindra.cloudlug.provider.CloudSelection? = null,
         pageSize: Int = 200,
     ): ManifestSummary {
         val transfer = harness.createTransfer()
@@ -34,8 +34,7 @@ class ManifestBuilderTest {
             transfer = transfer,
             source = harness.source,
             destinationCapabilities = destinationCapabilities,
-            selection = harness.selectionOf(*roots),
-            rootPathResolver = rootPathResolver,
+            selection = selection ?: harness.selectionOf(*roots),
         )
     }
 
@@ -60,7 +59,7 @@ class ManifestBuilderTest {
         val april = harness.source.storage.folder("April")
         harness.source.storage.file("1.png", ByteArray(10), april)
 
-        buildManifest(april, rootPathResolver = { CloudPath.parse("photos/2026/April") })
+        buildManifest(selection = harness.selectionAt(april to "photos/2026/April"))
 
         assertEquals(
             listOf("photos/2026/April", "photos/2026/April/1.png"),

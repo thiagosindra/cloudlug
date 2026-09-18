@@ -14,6 +14,7 @@ import dev.thiagosindra.cloudlug.model.TransferStatus
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -132,9 +133,17 @@ class TransferRepositoryTest {
         )
 
         val transfer = assertNotNull(repository.findTransfer(id))
-        assertEquals(1, transfer.skippedFiles)
+        // v1.2 §12.1 splits what ADR-0008 pooled as skippedFiles: an
+        // unsupported item is not a duplicate, and only duplicates count as
+        // success in §13.1.
+        assertEquals(1, transfer.unsupportedFiles)
+        assertEquals(0, transfer.duplicateFiles)
         assertEquals(1, transfer.conflictFiles)
         assertEquals(2, transfer.settledFiles)
+        // The native document reported no size (spec §11, §20.1).
+        assertEquals(1, transfer.unknownSizeFiles)
+        assertEquals(5, transfer.totalBytes)
+        assertFalse(transfer.settledCleanly)
     }
 
     @Test
@@ -245,7 +254,7 @@ class TransferRepositoryTest {
             ItemStatusReason.ERROR_PERMANENT,
         )
 
-        assertEquals(TransferStatus.COMPLETED_WITH_ERRORS, repository.finishTransfer(id).status)
+        assertEquals(TransferStatus.COMPLETED_WITH_ISSUES, repository.finishTransfer(id).status)
     }
 
     @Test

@@ -5,6 +5,7 @@ import dev.thiagosindra.cloudlug.model.CacheChunkId
 import dev.thiagosindra.cloudlug.model.CacheChunkStatus
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.CloudPath
+import dev.thiagosindra.cloudlug.model.HashCheckpoint
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.ProviderHash
 import dev.thiagosindra.cloudlug.model.ProviderType
@@ -24,8 +25,8 @@ import java.time.Instant
  * value classes, enums, Instant, CloudPath and ProviderHash — is the whole of
  * the Room migration in v0.2.
  *
- * TODO(v0.2): add @Entity/@PrimaryKey/@ForeignKey and the converters; the DAO
- * interfaces in `dao/` are already shaped for Room to implement.
+ * TODO(§33 v0.2): add @Entity/@PrimaryKey/@ForeignKey and the converters; the
+ * DAO interfaces in `dao/` are already shaped for Room to implement.
  */
 
 /** A transfer: two accounts, one enclosing destination folder, one manifest (spec §12.1). */
@@ -48,12 +49,25 @@ data class TransferEntity(
     val enumerationCursor: String? = null,
     val totalFiles: Int = 0,
     val completedFiles: Int = 0,
+    /** Items a previous run already transferred, or already present and provably identical (§19.3). */
+    val duplicateFiles: Int = 0,
+    /** Items that cannot move as bytes: native documents, shortcuts (§20.1, §20.2). */
+    val unsupportedFiles: Int = 0,
+    /** Items whose source revision changed after the user reviewed the manifest (§20.6). */
+    val sourceChangedFiles: Int = 0,
+    val conflictFiles: Int = 0,
     val failedFiles: Int = 0,
     val cancelledFiles: Int = 0,
-    val skippedFiles: Int = 0,
-    val conflictFiles: Int = 0,
+    /** Sum of known sizes only; see [unknownSizeFiles] (spec §11). */
     val totalBytes: Long = 0,
     val completedBytes: Long = 0,
+    /**
+     * Manifest items with no size before transfer — provider-native documents
+     * awaiting export (spec §11, §20.1). While this is non-zero the UI drives
+     * progress by file count and shows bytes as "at least", because
+     * [totalBytes] is a lower bound.
+     */
+    val unknownSizeFiles: Int = 0,
     val lastErrorCode: String? = null,
     val lastErrorMessage: String? = null,
 ) {
@@ -65,7 +79,20 @@ data class TransferEntity(
 
     /** Items that reached a terminal state, however they got there (spec §32.9). */
     val settledFiles: Int
-        get() = completedFiles + failedFiles + cancelledFiles + skippedFiles + conflictFiles
+        get() = completedFiles + duplicateFiles + unsupportedFiles + sourceChangedFiles +
+            conflictFiles + failedFiles + cancelledFiles
+
+    /**
+     * True when every settled item ended COMPLETED or SKIPPED_DUPLICATE, which
+     * is the only way a transfer may read "Completed" (spec §13.1).
+     */
+    val settledCleanly: Boolean
+        get() = unsupportedFiles == 0 && sourceChangedFiles == 0 &&
+            conflictFiles == 0 && failedFiles == 0 && cancelledFiles == 0
+
+    /** True while [totalBytes] is a lower bound rather than the whole job (spec §11). */
+    val hasUnknownSizes: Boolean
+        get() = unknownSizeFiles > 0
 }
 
 /** One object in the manifest: a file, a folder, or something that cannot move (spec §12.2). */
@@ -85,6 +112,13 @@ data class TransferItemEntity(
     val sourceProviderHash: ProviderHash? = null,
     val computedSha256: ProviderHash? = null,
     val computedDestinationNativeHash: ProviderHash? = null,
+    /**
+     * Serialized hasher state as of the last acknowledged chunk (spec §12.2,
+     * §19.4), written in the same transaction as that acknowledgment (§15.3) so
+     * hashing resumes after process death instead of needing chunks the cache
+     * has already deleted.
+     */
+    val hashCheckpoint: HashCheckpoint? = null,
     val destinationParentId: String? = null,
     val destinationObjectId: String? = null,
     val destinationRelativePath: CloudPath? = null,

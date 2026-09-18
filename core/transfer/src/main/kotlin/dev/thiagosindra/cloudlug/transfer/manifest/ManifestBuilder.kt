@@ -13,6 +13,7 @@ import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.CloudProvider
 import dev.thiagosindra.cloudlug.provider.CloudSelection
 import dev.thiagosindra.cloudlug.provider.ProviderCapabilities
+import dev.thiagosindra.cloudlug.provider.SelectionRoot
 import kotlinx.coroutines.flow.collect
 import java.time.Clock
 import java.util.UUID
@@ -53,26 +54,32 @@ class ManifestBuilder(
 ) {
 
     /**
-     * @param rootPathResolver where each selected root sits in the destination
-     *   tree. §10 preserves the source's own ancestors — a selection of
-     *   `/photos/2026/April` lands at `photos/2026/April` — and only the picker
-     *   knows those, since [CloudObject] carries identity rather than a path.
-     *   Defaults to the root's own name (docs/decisions.md ADR-0014).
+     * Walks [selection] and writes the manifest.
+     *
+     * Each root lands where its [SelectionRoot.displayPath] says: §10 preserves
+     * the source's own ancestors, so a selection of `/photos/2026/April` lands at
+     * `photos/2026/April`. Only the picker knows that path, since [CloudObject]
+     * carries identity rather than a path (§6, §9) — which is why it travels
+     * with the selection instead of through the `rootPathResolver` callback
+     * ADR-0014 used.
+     *
+     * [resumeAfter] continues an enumeration that process death interrupted; it
+     * is the last object ID this transfer persisted (spec §11).
      */
     suspend fun build(
         transfer: TransferEntity,
         source: CloudProvider,
         destinationCapabilities: ProviderCapabilities,
         selection: CloudSelection,
-        rootPathResolver: (CloudObject) -> CloudPath = { CloudPath.of(it.name) },
+        resumeAfter: CloudObjectId? = null,
     ): ManifestSummary {
         val state = BuildState(destinationCapabilities)
         val paths = mutableMapOf<CloudObjectId, CloudPath>()
-        val roots = selection.roots.associateBy { it.id }
+        val roots = selection.roots.associateBy { it.cloudObject.id }
 
-        source.enumerate(selection.accountId, selection).collect { obj ->
+        source.enumerate(selection.accountId, selection, resumeAfter).collect { obj ->
             val parentPath = when {
-                obj.id in roots -> roots.getValue(obj.id).let(rootPathResolver).parent ?: CloudPath.ROOT
+                obj.id in roots -> roots.getValue(obj.id).displayPath.parent ?: CloudPath.ROOT
                 else -> paths[obj.parentId]
                     ?: error("Adapter emitted ${obj.id.opaqueId} before its parent (spec §5: depth-first)")
             }
@@ -80,6 +87,8 @@ class ManifestBuilder(
             paths[obj.id] = path
 
             state.add(classify(transfer, obj, path, destinationCapabilities, state))
+            // The cursor is the last emitted object's ID (spec §11), persisted
+            // in the same transaction as the page it belongs to.
             if (state.pending.size >= pageSize) flush(transfer, state, cursor = obj.id.opaqueId)
         }
 

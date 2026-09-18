@@ -96,7 +96,7 @@ class TransferEngineTest {
         val item = harness.repository.listItems(transfer.id).single()
         assertEquals(TransferItemStatus.FAILED, item.status)
         assertEquals("verification_mismatch", item.lastErrorCode)
-        assertEquals(TransferStatus.COMPLETED_WITH_ERRORS, status)
+        assertEquals(TransferStatus.COMPLETED_WITH_ISSUES, status)
     }
 
     @Test
@@ -122,6 +122,9 @@ class TransferEngineTest {
         val file = harness.source.storage.file("report.txt", "new content".toByteArray())
         val transfer = harness.createTransfer()
         harness.engine.prepare(transfer.id, harness.selectionOf(file))
+        // Spec §10: the enclosing folder appears at READY -> RUNNING, so the
+        // destination cannot be seeded until the transfer has started.
+        harness.engine.start(transfer.id)
 
         // Something else put a different file at the destination first.
         val container = assertNotNull(harness.repository.findTransfer(transfer.id)?.destinationContainerId)
@@ -135,7 +138,7 @@ class TransferEngineTest {
 
         val item = harness.repository.listItems(transfer.id).single()
         assertEquals(TransferItemStatus.CONFLICT, item.status)
-        assertEquals(TransferStatus.COMPLETED_WITH_ERRORS, status)
+        assertEquals(TransferStatus.COMPLETED_WITH_ISSUES, status)
         assertEquals(
             "existing content",
             harness.destinationTree()["CloudLug - 2026-09-17 09-57/report.txt"],
@@ -294,6 +297,7 @@ class TransferEngineTest {
         harness.source.storage.file("clash.bin", "new".toByteArray(), folder)
         val transfer = harness.createTransfer()
         harness.engine.prepare(transfer.id, harness.selectionOf(folder))
+        harness.engine.start(transfer.id)
 
         val container = assertNotNull(harness.repository.findTransfer(transfer.id)?.destinationContainerId)
         val treeFolder = harness.destination.storage.folder(

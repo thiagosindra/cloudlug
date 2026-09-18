@@ -4,6 +4,7 @@ import dev.thiagosindra.cloudlug.database.TransferRepository
 import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.database.inmemory.InMemoryCloudLugDatabase
 import dev.thiagosindra.cloudlug.model.AccountId
+import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.HashAlgorithm
 import dev.thiagosindra.cloudlug.model.NetworkState
 import dev.thiagosindra.cloudlug.model.ProviderType
@@ -12,6 +13,7 @@ import dev.thiagosindra.cloudlug.model.TransferItemStatus
 import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
 import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.CloudSelection
+import dev.thiagosindra.cloudlug.provider.SelectionRoot
 import dev.thiagosindra.cloudlug.provider.ProviderCapabilities
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudProvider
 import dev.thiagosindra.cloudlug.storage.CacheBudgetPolicy
@@ -114,9 +116,20 @@ class TransferTestHarness(
         ),
     )
 
-    fun selectionOf(vararg roots: CloudObjectId): CloudSelection = CloudSelection(
+    fun selectionOf(vararg roots: CloudObjectId): CloudSelection = CloudSelection.of(
+        AccountId("source-account"),
+        roots.map { source.storage.find(it.opaqueId) ?: error("no object ${it.opaqueId}") },
+    )
+
+    /** A selection whose roots carry explicit destination paths (spec §9, §10). */
+    fun selectionAt(vararg roots: Pair<CloudObjectId, String>): CloudSelection = CloudSelection(
         accountId = AccountId("source-account"),
-        roots = roots.map { source.storage.find(it.opaqueId) ?: error("no object ${it.opaqueId}") },
+        roots = roots.map { (id, path) ->
+            SelectionRoot(
+                cloudObject = source.storage.find(id.opaqueId) ?: error("no object ${id.opaqueId}"),
+                displayPath = CloudPath.parse(path),
+            )
+        },
     )
 
     /** The destination tree as `path -> content`, for asserting on the result. */

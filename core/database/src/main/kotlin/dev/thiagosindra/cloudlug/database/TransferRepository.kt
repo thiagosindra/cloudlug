@@ -11,6 +11,7 @@ import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CacheChunkId
 import dev.thiagosindra.cloudlug.model.CacheChunkStatus
 import dev.thiagosindra.cloudlug.model.CloudObjectType
+import dev.thiagosindra.cloudlug.model.HashCheckpoint
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.ProviderHash
 import dev.thiagosindra.cloudlug.model.TransferId
@@ -35,9 +36,12 @@ import java.time.Instant
  *    not shift when the engine reaches them.
  *  - `totalBytes` sums the sizes the source reported; objects with no size
  *    (provider-native documents, §20.1) contribute nothing.
- *  - `skippedFiles` covers SKIPPED_DUPLICATE, SKIPPED_UNSUPPORTED and
- *    SOURCE_CHANGED: none of them moved bytes and none of them is a failure
- *    (docs/decisions.md ADR-0008).
+ *  - `duplicateFiles`, `unsupportedFiles` and `sourceChangedFiles` are separate
+ *    counters, because §13.1 makes only COMPLETED and SKIPPED_DUPLICATE count
+ *    as success and the summary shows each outcome on its own line. This
+ *    overrules ADR-0008, which pooled all three as `skippedFiles`.
+ *  - `unknownSizeFiles` counts manifest items with no size yet (§11, §20.1);
+ *    while it is non-zero `totalBytes` is a lower bound.
  */
 class TransferRepository(
     private val database: CloudLugDatabase,
@@ -138,6 +142,11 @@ class TransferRepository(
             var updated = transfer.copy(
                 totalFiles = transfer.totalFiles + fresh.count { it.objectKind != CloudObjectType.FOLDER },
                 totalBytes = transfer.totalBytes + fresh.sumOf { it.size ?: 0L },
+                // A file with no size yet is excluded from totalBytes and
+                // counted here instead, so the UI knows the denominator is a
+                // lower bound (spec §11).
+                unknownSizeFiles = transfer.unknownSizeFiles +
+                    fresh.count { it.objectKind != CloudObjectType.FOLDER && it.size == null },
                 updatedAt = now(),
             )
             // Items classified at manifest time are already terminal (§20.1–§20.4).
@@ -150,18 +159,24 @@ class TransferRepository(
     }
 
     /**
-     * Ends a transfer whose items have all settled: COMPLETED when nothing
-     * failed, was cancelled or is in conflict, COMPLETED_WITH_ERRORS otherwise
-     * (spec §13.1, §23). Skipped items do not make a transfer an error
-     * (docs/decisions.md ADR-0008).
+     * Ends a transfer whose items have all settled.
+     *
+     * COMPLETED only when every item ended COMPLETED or SKIPPED_DUPLICATE;
+     * anything unsupported, source-changed, conflicted, failed or cancelled
+     * makes it COMPLETED_WITH_ISSUES (spec §13.1). A transfer that moved half of
+     * what the user selected must never read "Completed" (§2.5). This overrules
+     * ADR-0008, under which skipped items alone left a transfer COMPLETED.
      */
     suspend fun finishTransfer(id: TransferId): TransferEntity = database.withTransaction {
         val transfer = requireTransfer(id)
         check(transfer.settledFiles >= transfer.totalFiles) {
             "Transfer $id still has ${transfer.totalFiles - transfer.settledFiles} unsettled items"
         }
-        val hasErrors = transfer.failedFiles > 0 || transfer.conflictFiles > 0 || transfer.cancelledFiles > 0
-        val to = if (hasErrors) TransferStatus.COMPLETED_WITH_ERRORS else TransferStatus.COMPLETED
+        val to = if (transfer.settledCleanly) {
+            TransferStatus.COMPLETED
+        } else {
+            TransferStatus.COMPLETED_WITH_ISSUES
+        }
         TransferStateMachine.require(transfer.status, to)
         val updated = transfer.copy(status = to, updatedAt = now())
         database.transfers.update(updated)
@@ -239,6 +254,32 @@ class TransferRepository(
         it.copy(computedSha256 = sha256, computedDestinationNativeHash = destinationNative)
     }
 
+    /**
+     * Records a size that was unknown at manifest time, once export has made it
+     * known (spec §11, §20.1).
+     *
+     * `totalBytes` and `unknownSizeFiles` move in the same transaction as the
+     * item, so the progress denominator can never be observed half-updated.
+     */
+    suspend fun recordItemSize(id: TransferItemId, size: Long): TransferItemEntity =
+        database.withTransaction {
+            require(size >= 0) { "Size must not be negative" }
+            val item = database.items.findById(id) ?: error("No transfer item $id")
+            check(item.size == null) { "Item $id already has a size of ${item.size}" }
+            val updated = item.copy(size = size, updatedAt = now())
+            database.items.update(updated)
+
+            val transfer = requireTransfer(item.transferId)
+            database.transfers.update(
+                transfer.copy(
+                    totalBytes = transfer.totalBytes + size,
+                    unknownSizeFiles = transfer.unknownSizeFiles - 1,
+                    updatedAt = now(),
+                ),
+            )
+            updated
+        }
+
     suspend fun recordRetryAttempt(
         id: TransferItemId,
         errorCode: String?,
@@ -302,6 +343,32 @@ class TransferRepository(
         }
 
     /**
+     * Acknowledges a chunk and checkpoints the item's hash in one transaction,
+     * which is what spec §15.3 requires: "Each chunk acknowledgment is persisted
+     * in the same transaction as the item's `hashCheckpoint`".
+     *
+     * Splitting the two would reintroduce exactly the gap ADR-0007 lived with.
+     * If the process dies between them, either the chunk is acknowledged with a
+     * stale checkpoint — and hashing would resume short, silently producing a
+     * wrong digest — or the checkpoint covers bytes the destination has not
+     * acknowledged. Both end in a failed verification for a sound transfer.
+     */
+    suspend fun acknowledgeCacheChunk(
+        id: CacheChunkId,
+        checkpoint: HashCheckpoint?,
+    ): CacheChunkEntity = database.withTransaction {
+        val chunk = database.chunks.findById(id) ?: error("No cache chunk $id")
+        CacheChunkStateMachine.require(chunk.status, CacheChunkStatus.ACKNOWLEDGED)
+        val updated = chunk.copy(status = CacheChunkStatus.ACKNOWLEDGED)
+        database.chunks.update(updated)
+
+        val item = database.items.findById(chunk.transferItemId)
+            ?: error("No transfer item ${chunk.transferItemId}")
+        database.items.update(item.copy(hashCheckpoint = checkpoint, updatedAt = now()))
+        updated
+    }
+
+    /**
      * Drops a chunk row once its bytes are gone. Callers delete the file first
      * and must have established that the chunk is no longer needed for recovery
      * (spec §32.4) — [CacheChunkStateMachine.isSafeToDelete] is that check.
@@ -352,13 +419,12 @@ class TransferRepository(
             completedBytes = completedBytes + delta * (item?.size ?: 0L),
         )
 
+        TransferItemStatus.SKIPPED_DUPLICATE -> copy(duplicateFiles = duplicateFiles + delta)
+        TransferItemStatus.SKIPPED_UNSUPPORTED -> copy(unsupportedFiles = unsupportedFiles + delta)
+        TransferItemStatus.SOURCE_CHANGED -> copy(sourceChangedFiles = sourceChangedFiles + delta)
+        TransferItemStatus.CONFLICT -> copy(conflictFiles = conflictFiles + delta)
         TransferItemStatus.FAILED -> copy(failedFiles = failedFiles + delta)
         TransferItemStatus.CANCELLED -> copy(cancelledFiles = cancelledFiles + delta)
-        TransferItemStatus.CONFLICT -> copy(conflictFiles = conflictFiles + delta)
-        TransferItemStatus.SKIPPED_DUPLICATE,
-        TransferItemStatus.SKIPPED_UNSUPPORTED,
-        TransferItemStatus.SOURCE_CHANGED,
-        -> copy(skippedFiles = skippedFiles + delta)
 
         else -> this
     }

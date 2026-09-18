@@ -4,7 +4,7 @@ import dev.thiagosindra.cloudlug.model.TransferStatus
 import dev.thiagosindra.cloudlug.model.TransferStatus.AUTH_REQUIRED
 import dev.thiagosindra.cloudlug.model.TransferStatus.CANCELLED
 import dev.thiagosindra.cloudlug.model.TransferStatus.COMPLETED
-import dev.thiagosindra.cloudlug.model.TransferStatus.COMPLETED_WITH_ERRORS
+import dev.thiagosindra.cloudlug.model.TransferStatus.COMPLETED_WITH_ISSUES
 import dev.thiagosindra.cloudlug.model.TransferStatus.DRAFT
 import dev.thiagosindra.cloudlug.model.TransferStatus.FAILED
 import dev.thiagosindra.cloudlug.model.TransferStatus.PAUSED
@@ -33,7 +33,7 @@ class IllegalTransferTransitionException(
  *  2. A waiting or paused transfer may be cancelled, and returns to RUNNING when
  *     its condition clears (§16, §22.1).
  *  3. "Retry incomplete files" (§22.4) re-enumerates, so FAILED,
- *     CANCELLED and COMPLETED_WITH_ERRORS may go back to PREPARING. COMPLETED
+ *     CANCELLED and COMPLETED_WITH_ISSUES may go back to PREPARING. COMPLETED
  *     may not: there is nothing incomplete to retry.
  */
 object TransferStateMachine {
@@ -50,7 +50,7 @@ object TransferStateMachine {
             FAILED,
             CANCELLED,
             COMPLETED,
-            COMPLETED_WITH_ERRORS,
+            COMPLETED_WITH_ISSUES,
         ),
         PAUSED to setOf(RUNNING, CANCELLED, FAILED),
         WAITING_FOR_WIFI to setOf(RUNNING, PREPARING, PAUSED, CANCELLED, FAILED),
@@ -59,7 +59,7 @@ object TransferStateMachine {
         // Terminal states. Retry re-enters PREPARING; nothing else may follow.
         FAILED to setOf(PREPARING),
         CANCELLED to setOf(PREPARING),
-        COMPLETED_WITH_ERRORS to setOf(PREPARING),
+        COMPLETED_WITH_ISSUES to setOf(PREPARING),
         COMPLETED to emptySet(),
     )
 

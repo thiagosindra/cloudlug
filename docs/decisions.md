@@ -9,9 +9,20 @@ The point of this file is that nothing in the implementation diverges from the
 specification silently. If you find code that contradicts the spec and is not
 explained here, that is a bug in the code or in this file.
 
+Every ADR carries a **Status** line. Spec v1.2 was written against this log and
+settled all eighteen of the v0.1 entries: *Ratified* means the spec now says
+what the ADR decided, so the reasoning below is history and the rule lives in
+`docs/spec.md`; *Overruled* means v1.2 decided differently and the code has been
+changed to match — the entry is kept so the change is traceable rather than
+looking like drift; *Superseded* means the milestone the ADR described has
+passed. Entries from ADR-0019 on are newer than v1.2.1 and are live decisions
+again.
+
 ---
 
 ## ADR-0001 — Module layout follows spec §4, with one addition and several deferrals
+
+**Status.** Ratified — v1.2.1 adds `core/hashing` to the §4 tree and names it as the home of the §19.4 pipeline.
 
 **Question.** §4 fixes the repository structure. v0.1 does not implement all of
 it, and the dual-hash pipeline (§19.4) has no obvious home in the listed
@@ -32,6 +43,8 @@ storage, v0.5), `core/ui`, `app/` and `feature/*` (see ADR-0003).
 ---
 
 ## ADR-0002 — v0.1 has no Room; DAO interfaces plus an in-memory store
+
+**Status.** Superseded — §33 v0.2 lands Room behind these DAO interfaces. The entry stands as the record of why v0.1 shipped without it.
 
 **Question.** §12 specifies a Room persistence model, and the milestone requires
 transactional state transitions. Room is an Android/androidx library and its
@@ -60,6 +73,8 @@ repository or engine code should need to change.
 
 ## ADR-0003 — v0.1 ships the JVM core only; the Android modules are deferred
 
+**Status.** Superseded — §33 v0.2 lands `:app`, `core/ui` and `feature/*`.
+
 **Question.** §4 and §24 call for `app/`, `core/ui` and `feature/*` built with
 Compose, and §3 names Hilt and AppAuth. None of AGP, Compose, Hilt or androidx
 can be resolved in this environment, so those modules could be written but never
@@ -79,6 +94,8 @@ StatFs, Hilt bindings and `filesDir` later without touching the engine.
 
 ## ADR-0004 — Reading the transfer state machine of §13.1
 
+**Status.** Ratified — v1.2 §13.1 gives `PREPARING` the `WAITING_FOR_WIFI` and `AUTH_REQUIRED` edges for the reason given here. Point 3 now reads `COMPLETED_WITH_ISSUES`, which is what that state is called since v1.2.
+
 **Question.** The §13.1 diagram hangs the waiting states off `RUNNING` only, and
 does not say what follows a terminal state.
 
@@ -96,6 +113,8 @@ does not say what follows a terminal state.
 ---
 
 ## ADR-0005 — Reading the file state machine of §13.2
+
+**Status.** Ratified — v1.2 §13.2 states outright that item state means "furthest stage reached", with §15.3 chunk states carrying the overlap.
 
 **Question.** §13.2 draws one linear chain, but several specified behaviours do
 not fit on it.
@@ -130,6 +149,8 @@ not fit on it.
 
 ## ADR-0006 — The enumeration cursor is an opaque resume token
 
+**Status.** Overruled — v1.2 §5 and §11 make the resume token the last emitted object's ID, passed as `enumerate(resumeAfter = ...)`, rather than an opaque cursor on the selection. `CloudSelection.resumeCursor` is gone.
+
 **Question.** §11 and §12.1 require resumable enumeration with a persisted page
 cursor, but the §5 signature is `enumerate(...): Flow<CloudObject>`, which
 carries no cursor back to the caller.
@@ -143,6 +164,8 @@ deduplicates by source object ID, so restarting is correct, only slower.
 ---
 
 ## ADR-0007 — Hash pipeline state is not persisted across process death
+
+**Status.** Overruled — v1.2 §19.4 requires checkpointable hashers, and §21 removed the permissive fallback this ADR relied on, so degrading after process death would now mean the item cannot complete at all. SHA-256, SHA-1 and MD5 are hand-written with serializable state; see ADR-0019.
 
 **Question.** §19.4 computes both hashes in one streaming pass and forbids
 re-reading a multi-gigabyte cached object merely to hash it. A `MessageDigest`'s
@@ -165,6 +188,8 @@ resumed uploads losing verification.
 
 ## ADR-0008 — Counter semantics §12.1 leaves undefined
 
+**Status.** Overruled — v1.2 §12.1 splits `skippedFiles` into `duplicateFiles`, `unsupportedFiles` and `sourceChangedFiles` and adds `unknownSizeFiles`, and §13.1 counts only `COMPLETED` and `SKIPPED_DUPLICATE` as success. The last bullet below is exactly what v1.2 reversed: skipped items alone *do* now make a transfer `COMPLETED_WITH_ISSUES`.
+
 **Question.** §12.1 names counters but does not define what each counts, and
 §13.2 adds `SOURCE_CHANGED`, which has no counter at all.
 
@@ -185,6 +210,8 @@ resumed uploads losing verification.
 
 ## ADR-0009 — Order of operations in the §15 cache budget
 
+**Status.** Ratified — v1.2 §15 states the order normatively: reserve first, then halve, then cap.
+
 **Question.** §15 defines `cacheBudget = min(usableStorage * 0.50,
 configuredMaximumCache)` before §15.1 defines `usableStorage = freeSpace -
 max(1 GiB, totalDeviceStorage * 0.05)`. Read in the other order the reserve
@@ -198,6 +225,8 @@ then cap at the configured maximum. This is the conservative reading and matches
 
 ## ADR-0010 — One waiting state for all connectivity holds
 
+**Status.** Ratified — recorded in the v1.2.1 changelog without a text change.
+
 **Question.** §13.1 provides `WAITING_FOR_WIFI`, but a transfer can also be
 holding because there is no network at all, including under `ANY_NETWORK`.
 
@@ -208,6 +237,8 @@ reason; the state machine does not need to distinguish them.
 ---
 
 ## ADR-0011 — §21 step 3 is strict
+
+**Status.** Ratified — v1.2 §21 says a provider declaring `supportsServerHash` that returns no hash leaves the item unverifiable, and unverifiable items do not complete.
 
 **Question.** §21 step 3 allows "size match plus provider integrity signal", but
 does not say what counts as an integrity signal, and step 4 permits metadata-only
@@ -223,6 +254,8 @@ would contradict it, and §32.3 makes `COMPLETED` a claim about verification.
 
 ## ADR-0012 — Enclosing-folder name collisions
 
+**Status.** Ratified — v1.2 §10 specifies the numeric suffix for two transfers created in the same minute.
+
 **Question.** §10 requires that independent transfers not silently merge into
 one enclosing folder, but the name is derived from the date and minute, so two
 transfers started in the same minute would collide.
@@ -235,6 +268,8 @@ what the user reviewed, while the enclosing folder is CloudLug's own container.
 ---
 
 ## ADR-0013 — Name legality is incomplete until a real adapter needs more
+
+**Status.** Overruled — v1.2 §5 adds `disallowsTrailingSpaceOrDot` and `maxPathLength`, which is what this ADR was waiting for. Both rules are enforced now; the TODO is gone.
 
 **Question.** §20.4 says providers differ on illegal characters, trailing spaces
 and dots, and maximum name *and path* length. `ProviderCapabilities` as
@@ -249,6 +284,8 @@ now. Marked with a TODO in `DestinationNameLegality`.
 ---
 
 ## ADR-0014 — Where a selected root lands in the destination tree
+
+**Status.** Overruled — v1.2 §9 has the selection carry each root's destination-relative display path, so the path is data travelling with the selection rather than a `rootPathResolver` callback handed to the builder. The reasoning about *why* the picker is the only component that knows the path survives intact.
 
 **Question.** §10's example maps a selection of `/photos/2026/April` to
 `photos/2026/April` at the destination — the source's ancestors are preserved —
@@ -265,6 +302,8 @@ supplies it. This keeps paths out of the identity model while still reproducing
 
 ## ADR-0015 — `enumerate` keeps its `suspend` modifier
 
+**Status.** Overruled — v1.2 §5 drops the redundant `suspend`, which is the revision this ADR said would be needed to justify removing it.
+
 **Question.** §5 declares `suspend fun enumerate(...): Flow<CloudObject>`. The
 `suspend` is redundant: returning a cold `Flow` does not suspend.
 
@@ -275,6 +314,8 @@ reviewable against the spec. Worth removing only if the spec is revised.
 ---
 
 ## ADR-0016 — Two chunk transitions §15.3 does not draw
+
+**Status.** Ratified — v1.2 §15.3 draws both failure edges.
 
 **Question.** §15.3 draws
 `ALLOCATED -> DOWNLOADING -> READY -> UPLOADING -> ACKNOWLEDGED -> DELETED`,
@@ -289,6 +330,8 @@ of anything the destination has not acknowledged.
 ---
 
 ## ADR-0017 — The v0.1 pipeline is sequential per chunk
+
+**Status.** Ratified — recorded in the v1.2.1 changelog without a text change; §18 still says measure first.
 
 **Question.** §14 overlaps a file's download and upload; §18 says to start
 conservatively and measure before adding concurrency.
@@ -305,6 +348,8 @@ depend on the loop's shape.
 
 ## ADR-0018 — Process death is not a provider error
 
+**Status.** Ratified — v1.2 §31.3 separates process interruption from network failure and forbids routing it through the retry policy.
+
 **Question.** §31.3 lists "process interruption" among the failures
 `FakeCloudProvider` must simulate, alongside network errors, but the two demand
 opposite handling: a network error should be retried and may end an item in
@@ -316,3 +361,52 @@ recovered from on the next run.
 the retry policy never sees it and no item is settled by it. The §31.4 crash
 scenarios then test what they claim to: recovery through the authoritative
 database, not error handling.
+
+---
+
+## ADR-0019 — The block-list hasher checkpoints in constant space
+
+**Question.** §19.4 describes the checkpointable state of the Dropbox block hash
+as "the list of completed block digests at 32 bytes per 4 MiB". Taken literally,
+a 100 GiB object would carry roughly 800 KB of checkpoint, rewritten on every
+chunk acknowledgment — into a column that §12.2 puts on the item row.
+
+**Decision.** Do not retain the digest list. The outer hash is itself a
+streaming SHA-256 over the concatenated block digests, so each block digest is
+folded into it the moment the block closes. The checkpoint is then the outer
+hasher's state plus the in-progress block's state: two Merkle-Damgard snapshots,
+constant size, a few hundred bytes regardless of object size.
+
+This produces byte-identical output — it is the same concatenation, absorbed
+incrementally instead of buffered — and `CheckpointTest` pins that by hashing
+across block boundaries and by showing the checkpoint does not grow over 32 MiB.
+
+**What changes it.** Nothing in the algorithm. If a future provider defined a
+block hash whose outer function needed the digests out of order, this would not
+hold, and the flat list would be the only option.
+
+---
+
+## ADR-0020 — `READY -> RUNNING` is a method, not an implicit step
+
+**Question.** v1.2 §10 attaches enclosing-folder creation to the
+`READY -> RUNNING` transition. The engine had no way to perform that transition
+on its own: `run()` transitioned and then processed items in one call, so
+creating the folder "at the transition" had no seam to attach to, and nothing
+could observe a started-but-not-yet-moving transfer.
+
+**Decision.** Add `TransferEngine.start()`, which creates the folder and
+performs the transition, and have `run()` call it when the transfer is not yet
+`RUNNING`. Resuming a paused transfer therefore does not create a second folder,
+and a caller that wants the two separated — the wizard's "Start transfer" button
+in §24.2, and the tests that seed a destination object before any byte moves —
+can have them.
+
+The two steps also fail differently, which is the deeper reason to separate
+them: §10 says a transfer whose folder cannot be created fails fast with zero
+bytes moved, whereas a failure inside `run()` leaves a partially transferred
+manifest to resume.
+
+**What changes it.** If §10 were revised to create the folder lazily, at the
+first item that needs a destination parent, `start()` would lose its only
+responsibility and should be folded back into `run()`.
