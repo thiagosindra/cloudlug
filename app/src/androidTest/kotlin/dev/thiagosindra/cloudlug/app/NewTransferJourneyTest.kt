@@ -1,13 +1,14 @@
 package dev.thiagosindra.cloudlug.app
 
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.printToString
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
 import org.junit.Test
@@ -15,7 +16,7 @@ import org.junit.runner.RunWith
 
 /**
  * Drives the §24.2 wizard the way a person does, from the home screen to a
- * running transfer.
+ * completed, verified transfer.
  *
  * This exists because v0.2.1 shipped a wizard whose picker was empty on a real
  * device while every check was green. `FirstRunSmokeTest` proved the app
@@ -67,36 +68,81 @@ class NewTransferJourneyTest {
         awaitText("5. Review", timeoutMillis = 60_000)
         node("Start transfer").performClick()
 
-        awaitText("Transfer started.")
+        // Starting replaces the wizard with the transfer's detail screen —
+        // MainActivity pops NEW_TRANSFER so that backing out of a started
+        // transfer reaches home rather than step 5 — so the wizard's own
+        // "Transfer started." is never drawn. §24.3 is where a started
+        // transfer is observable.
+        awaitText("Dropbox -> Google Drive", timeoutMillis = 30_000)
+
+        // And it does not merely start. The engine runs to completion inside
+        // the app, with every item verified at the destination per §21, which
+        // until now had only ever been shown in JVM tests.
+        awaitText("Completed", timeoutMillis = 60_000)
+        awaitText("verified by destination hash")
     }
 
     /** Waits for [text] to exist, then returns it for clicking. */
     private fun node(text: String): SemanticsNodeInteraction {
         awaitText(text)
-        return compose.onNodeWithText(text)
+        return compose.onNodeWithText(text, useUnmergedTree = true)
     }
 
     /**
      * The engine works off the main thread, so every step is awaited.
      *
-     * On timeout it prints the semantics tree. A Compose failure otherwise says
-     * only that a node was absent, which leaves the interesting half — what was
-     * on screen instead — to be guessed at from a CI log.
+     * Everything here reads the **unmerged** semantics tree. Matching the
+     * merged tree found nothing while the screen plainly held the text: the
+     * failure that established this reported `Never found "New Transfer". On
+     * screen: ... | CloudLug | New Transfer`, the two halves disagreeing
+     * because the diagnosis read the unmerged tree and the wait did not. That
+     * is the observation; the reason Material3's FAB does not surface its label
+     * to a merged-tree text match is not something this test needs to settle.
+     *
+     * On timeout it reports every string on screen, on one line. An earlier
+     * version printed the whole semantics tree, which was the right idea and
+     * the wrong channel: Gradle's console kept the first two lines of the
+     * message and dropped the tree, so the run cost a cycle and answered
+     * nothing.
      */
     private fun awaitText(text: String, timeoutMillis: Long = 20_000) {
         try {
             compose.waitUntil(timeoutMillis) {
-                compose.onAllNodesWithText(text, substring = true)
+                compose.onAllNodesWithText(text, substring = true, useUnmergedTree = true)
                     .fetchSemanticsNodes()
                     .isNotEmpty()
             }
         } catch (timeout: ComposeTimeoutException) {
-            throw AssertionError(
-                "Never found \"$text\" within ${timeoutMillis}ms. On screen instead:\n" +
-                    runCatching { compose.onRoot().printToString(maxDepth = 100) }
-                        .getOrElse { "<could not print the semantics tree: $it>" },
-                timeout,
-            )
+            throw AssertionError(diagnose(text), timeout)
         }
+    }
+
+    private fun diagnose(missing: String): String {
+        val onScreen = runCatching { textsOnScreen() }
+            .getOrElse { return "Never found \"$missing\", and the screen could not be read: $it" }
+        val prefix = if (onScreen.any { it.startsWith(CRASH_SCREEN_TITLE) }) {
+            // Not a flaw in this test. FirstRunSmokeTest runs first in the same
+            // app data directory, so a crash it recorded is displayed on the
+            // next launch — meaning the app threw an uncaught exception, which
+            // matters far more than the assertion that tripped over it.
+            "THE APP CRASHED EARLIER: MainActivity is showing the crash reporter, " +
+                "not the home screen. Fix the exception below, not this test. "
+        } else {
+            ""
+        }
+        return prefix + "Never found \"$missing\". On screen: " +
+            onScreen.joinToString(" | ") { it.replace('\n', ' ') }.take(3000)
+    }
+
+    /** Every string the screen is currently drawing, flattened. */
+    private fun textsOnScreen(): List<String> =
+        compose.onAllNodes(hasText("", substring = true), useUnmergedTree = true)
+            .fetchSemanticsNodes()
+            .flatMap { node ->
+                node.config.getOrNull(SemanticsProperties.Text).orEmpty().map { it.text }
+            }
+
+    private companion object {
+        const val CRASH_SCREEN_TITLE = "CloudLug crashed last time"
     }
 }
