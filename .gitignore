@@ -14,7 +14,12 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
-release/
+# AGP's legacy signed-output directory. Anchored to a module root, because an
+# unanchored `release/` also matches `app/src/release/` — a variant source set.
+# It did, silently: `git add -A` skipped the release-variant crash reporter, the
+# local build kept working from the untracked file, and only a clean CI checkout
+# failed. Modern AGP writes outputs under `build/`, which is ignored above.
+/*/release/
 output.json
 
 # Signing material and provider credentials must never be committed (spec §30)
