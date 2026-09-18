@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.Flow
  */
 
 @Dao
-internal interface RoomTransferDao : TransferDao {
+interface RoomTransferDao : TransferDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     override suspend fun insert(transfer: TransferEntity)
@@ -58,7 +58,7 @@ internal interface RoomTransferDao : TransferDao {
 }
 
 @Dao
-internal interface RoomTransferItemDao : TransferItemDao {
+interface RoomTransferItemDao : TransferItemDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     override suspend fun insertAll(items: List<TransferItemEntity>)
@@ -120,7 +120,7 @@ internal interface RoomTransferItemDao : TransferItemDao {
 }
 
 @Dao
-internal interface RoomCacheChunkDao : CacheChunkDao {
+interface RoomCacheChunkDao : CacheChunkDao {
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     override suspend fun insert(chunk: CacheChunkEntity)
@@ -167,7 +167,7 @@ internal interface RoomCacheChunkDao : CacheChunkDao {
 }
 
 @Dao
-internal interface RoomAccountDao : AccountDao {
+interface RoomAccountDao : AccountDao {
 
     @Upsert
     override suspend fun upsert(account: AccountEntity)

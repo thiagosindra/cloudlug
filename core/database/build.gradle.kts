@@ -17,10 +17,12 @@ dependencies {
     api(project(":core:model"))
     api(libs.kotlinx.coroutines.core)
     api(libs.room.runtime)
-    // The bundled driver ships SQLite for both the JVM and Android ABIs, so the
-    // tests and the app run the same engine — ADR-0021.
-    api(libs.sqlite.bundled)
     ksp(libs.room.compiler)
 
+    // The bundled driver is a *test* dependency. It was `api` in v0.2, which put
+    // a desktop SQLite and the JVM-only builders on the APK's classpath; the
+    // app now uses Room's Android builder and the platform driver instead
+    // (ADR-0021 as revised, ADR-0025).
+    testImplementation(libs.sqlite.bundled)
     testImplementation(libs.kotlinx.coroutines.test)
 }

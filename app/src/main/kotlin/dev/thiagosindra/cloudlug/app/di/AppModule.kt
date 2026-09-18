@@ -11,7 +11,11 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dev.thiagosindra.cloudlug.database.TransferRepository
 import dev.thiagosindra.cloudlug.database.dao.CloudLugDatabase
-import dev.thiagosindra.cloudlug.database.room.CloudLugDatabases
+import androidx.room.Room
+import androidx.sqlite.driver.AndroidSQLiteDriver
+import dev.thiagosindra.cloudlug.database.room.CloudLugDatabaseFactory
+import dev.thiagosindra.cloudlug.database.room.CloudLugRoomDatabase
+import dev.thiagosindra.cloudlug.database.room.asCloudLugDatabase
 import dev.thiagosindra.cloudlug.model.NetworkState
 import dev.thiagosindra.cloudlug.storage.ChunkStore
 import dev.thiagosindra.cloudlug.storage.FileSystemChunkStore
@@ -40,14 +44,45 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
+    private const val DATABASE_NAME = "cloudlug.db"
+
     @Provides
     @Singleton
     fun clock(): Clock = Clock.systemUTC()
 
+    /**
+     * Opens the §12 database, the one piece of persistence that has to know it
+     * is on Android (ADR-0025).
+     *
+     * `:core:database` is a Kotlin/JVM module. Room publishes separate Android
+     * and JVM artifacts whose `RoomDatabase.Builder` constructors differ — the
+     * Android one takes a `Context` — so a JVM module naming either overload
+     * compiles fine and then throws `NoSuchMethodError` on whichever platform
+     * it did not pick. v0.2 shipped exactly that. Construction therefore sits
+     * here, beside ConnectivityManager and StatFs, for the same reason those do.
+     */
     @Provides
     @Singleton
-    fun database(@ApplicationContext context: Context): CloudLugDatabase =
-        CloudLugDatabases.atPath(context.getDatabasePath("cloudlug.db").absolutePath)
+    fun databaseFactory(@ApplicationContext context: Context) = CloudLugDatabaseFactory {
+        Room.databaseBuilder(
+            context = context,
+            klass = CloudLugRoomDatabase::class.java,
+            name = context.getDatabasePath(DATABASE_NAME).absolutePath,
+        )
+            // The platform's own SQLite, not the bundled build. v0.2 shipped
+            // BundledSQLiteDriver to keep the app and the JVM tests on one
+            // engine; that put a second native SQLite in the APK for no benefit
+            // the app can observe, and the tests keep the bundled driver
+            // regardless — ADR-0021 as revised.
+            .setDriver(AndroidSQLiteDriver())
+            .setQueryCoroutineContext(Dispatchers.IO)
+            .build()
+            .asCloudLugDatabase()
+    }
+
+    @Provides
+    @Singleton
+    fun database(factory: CloudLugDatabaseFactory): CloudLugDatabase = factory.open()
 
     @Provides
     @Singleton

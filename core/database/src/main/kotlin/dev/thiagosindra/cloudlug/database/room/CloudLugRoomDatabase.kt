@@ -1,12 +1,10 @@
 package dev.thiagosindra.cloudlug.database.room
 
 import androidx.room.Database
-import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transactor
 import androidx.room.TypeConverters
 import androidx.room.useWriterConnection
-import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import dev.thiagosindra.cloudlug.database.dao.AccountDao
 import dev.thiagosindra.cloudlug.database.dao.CacheChunkDao
 import dev.thiagosindra.cloudlug.database.dao.CloudLugDatabase
@@ -16,7 +14,6 @@ import dev.thiagosindra.cloudlug.database.entity.AccountEntity
 import dev.thiagosindra.cloudlug.database.entity.CacheChunkEntity
 import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.database.entity.TransferItemEntity
-import kotlinx.coroutines.Dispatchers
 
 /**
  * The §12 persistence model as Room sees it.
@@ -37,7 +34,7 @@ import kotlinx.coroutines.Dispatchers
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
-internal abstract class CloudLugRoomDatabase : RoomDatabase() {
+abstract class CloudLugRoomDatabase : RoomDatabase() {
     abstract fun transferDao(): RoomTransferDao
     abstract fun transferItemDao(): RoomTransferItemDao
     abstract fun cacheChunkDao(): RoomCacheChunkDao
@@ -73,34 +70,29 @@ internal class RoomCloudLugDatabase(
 }
 
 /**
- * Builds the Room-backed [CloudLugDatabase].
+ * How the platform opens the database (spec §4).
  *
- * Both factories use [BundledSQLiteDriver], so the JVM tests and the Android
- * app run the same SQLite build rather than whatever version happens to ship
- * with a given device — see docs/decisions.md ADR-0021.
+ * This mirrors `NetworkMonitor` and `StorageMonitor`: `:core:database` owns the
+ * schema, the DAOs and the §13 rules, and knows nothing about how a database is
+ * opened on the platform it happens to run on. `:app` implements this with
+ * Room's Android builder and the platform SQLite driver; the JVM tests
+ * implement it with the bundled driver.
+ *
+ * It exists because the alternative shipped a crash. v0.2 called Room's
+ * **JVM-only** `Room.databaseBuilder(name, factory)` from this module. It
+ * compiled and passed every JVM test, then died on the first real device with
+ * `NoSuchMethodError`: the Android artifact's `RoomDatabase.Builder` takes a
+ * `Context`, so that constructor does not exist at runtime there. A JVM module
+ * must not name a platform-specific construction API — see ADR-0025, and
+ * `NoPlatformSpecificRoomApiTest`, which fails the build if one reappears here.
  */
-object CloudLugDatabases {
-
-    /** On-disk database. On Android, pass `context.getDatabasePath(...)`. */
-    fun atPath(path: String): CloudLugDatabase =
-        RoomCloudLugDatabase(
-            Room.databaseBuilder<CloudLugRoomDatabase>(name = path)
-                .setDriver(BundledSQLiteDriver())
-                .setQueryCoroutineContext(Dispatchers.IO)
-                .build(),
-        )
-
-    /**
-     * In-memory database, discarded when closed. This is what the Room tests
-     * use, and it needs no Android device — spec §33 v0.2 asks for the Room
-     * transaction tests to run on the JVM if the Room version allows it, and
-     * 2.8's KMP artifacts do.
-     */
-    fun inMemory(): CloudLugDatabase =
-        RoomCloudLugDatabase(
-            Room.inMemoryDatabaseBuilder<CloudLugRoomDatabase>()
-                .setDriver(BundledSQLiteDriver())
-                .setQueryCoroutineContext(Dispatchers.IO)
-                .build(),
-        )
+fun interface CloudLugDatabaseFactory {
+    fun open(): CloudLugDatabase
 }
+
+/**
+ * Wraps a database the platform already built, so callers get the
+ * [CloudLugDatabase] the repository depends on without this module ever
+ * constructing one.
+ */
+fun CloudLugRoomDatabase.asCloudLugDatabase(): CloudLugDatabase = RoomCloudLugDatabase(this)
