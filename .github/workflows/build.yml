@@ -133,21 +133,44 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # An x86_64 system image cannot fall back to software emulation: without
-      # KVM the emulator prints "x86_64 emulation currently requires hardware
-      # acceleration" and exits immediately. That is invisible downstream — the
-      # device simply never appears, and the action polls a dead port until it
-      # times out. Three runs were misdiagnosed as slow boot on exactly that
-      # signature, so assert acceleration here and fail in seconds with a
-      # readable reason rather than in fifteen minutes with none.
+      # Anything that stops the emulator process from starting looks identical
+      # downstream: the device never registers, and the action polls a dead
+      # port until it times out. These two steps assert the preconditions up
+      # front so a failure names itself instead of having to be inferred.
       - name: Require hardware acceleration
         run: |
-          echo "CPU virtualisation flags: $(grep -c -E '(vmx|svm)' /proc/cpuinfo || echo 0)"
           if [ ! -e /dev/kvm ]; then
             echo "::error::No /dev/kvm on this runner. The x86_64 emulator cannot start."
             exit 1
           fi
           ls -l /dev/kvm
+
+      # The real cause of four consecutive "Timeout waiting for emulator to
+      # boot" failures, which the emulator states plainly and the action then
+      # swallows:
+      #
+      #   FATAL | Not enough space to create userdata partition.
+      #           Available: 7131.55 MB, need 7372.80 MB.
+      #
+      # 241 MB short. The runner ships toolchains this build never touches —
+      # CloudLug is pure Kotlin with no native code, so the NDK alone is dead
+      # weight. Dropping them buys headroom well beyond the shortfall.
+      - name: Free disk space for the AVD
+        run: |
+          df -h --output=avail / | tail -1 | xargs echo "Available before:"
+          sudo rm -rf \
+            /usr/local/lib/android/sdk/ndk \
+            /usr/share/dotnet \
+            /usr/share/swift \
+            /opt/ghc \
+            /usr/local/share/boost \
+            /opt/hostedtoolcache/CodeQL
+          df -h --output=avail / | tail -1 | xargs echo "Available after:"
+          avail=$(df -m --output=avail /home/runner | tail -1 | tr -d ' ')
+          if [ "$avail" -lt 12000 ]; then
+            echo "::error::Only ${avail} MB free; the AVD needs ~7.4 GB plus build output."
+            exit 1
+          fi
 
       - name: Run the smoke test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
