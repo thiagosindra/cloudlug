@@ -1,11 +1,37 @@
 # CloudLug — Technical Design Specification
 
 **Local-Only Cloud-to-Cloud File Transfer for Android**
-*Technical Design Specification v1.1 • Open Source • Google Play*
+*Technical Design Specification v1.2.1 • Open Source • Google Play*
 
 CloudLug transfers files between supported cloud-storage providers using the user's Android device as the only intermediary. The application operates no file-transfer backend and is designed from the start around provider-neutral adapters, durable recovery, bounded local caching, conservative destination behavior, and future expansion to additional cloud services.
 
 ---
+
+## Changes in v1.2.1
+
+- **§4 gains `core/hashing`.** Ratifies ADR 0001 from the v0.1 implementation: the §19.4 pipeline has behaviour (so not `core/model`), is not about disk (so not `core/storage`), and one of its algorithms is specified only by Dropbox, so it cannot live in `core/transfer`, which must name no provider. Isolating it lets the engine select an algorithm through `ProviderCapabilities.nativeHashAlgorithm`.
+- ADRs 0010 (one waiting state covers both offline and metered) and 0017 (sequential pipeline until measured, per §18) are ratified without text changes.
+
+## Changes in v1.2
+
+Amendments from the v0.1 implementation report (`docs/decisions.md`, 18 ADRs). Every reading the implementer took is now either ratified in the text or overruled here.
+
+- **§15 ordering fixed.** Emergency reserve is defined before the cache budget; reserve first, then halve.
+- **§13.2 item state defined as "furthest stage reached"**, with §15.3 chunk states carrying the download/upload overlap that §14 requires.
+- **§19.3 now begins with the §19.2 idempotency check.** This ordering is load-bearing: without it, a Dropbox → Drive re-run reports conflicts against CloudLug's own uploads.
+- **`SOURCE_CHANGED` and `SKIPPED_UNSUPPORTED` get their own counters, and a transfer with any of them ends `COMPLETED_WITH_ISSUES`** (renamed from `COMPLETED_WITH_ERRORS`). Only `COMPLETED` and `SKIPPED_DUPLICATE` items count as success (§13.1). Overrules the implementation's reading.
+- **§21 step 3 deleted.** A provider that claims a server hash and returns none for an object leaves the item unverifiable, and unverifiable items do not complete.
+- **Checkpointable hashers (§19.4).** Hash state is persisted with each chunk acknowledgment, so verification never degrades after process death. Replaces the "unverifiable after resume" outcome.
+- **Enclosing folder is created at `READY → RUNNING`, not during `PREPARING` (§10).**
+- **Size-unknown items (§11, §20.1).** `totalBytes` counts known sizes; the progress denominator falls back to file count.
+- **§5:** `enumerate` is no longer `suspend`; the last emitted object's ID is the enumeration resume token (§11); `ProviderCapabilities` gains `disallowsTrailingSpaceOrDot` and `maxPathLength`.
+- **§9:** a selection carries the destination-relative display path of each root, since only the picker knows it.
+- **§10:** two transfers created in the same minute get a numeric suffix on the enclosing folder.
+- **§13.1:** `PREPARING` can enter `WAITING_FOR_WIFI` and `AUTH_REQUIRED`; enumeration needs network and a valid token too.
+- **§15.3:** chunk chain gains failure edges `DOWNLOADING → ALLOCATED` and `UPLOADING → READY`.
+- **§31.3:** process interruption is separated from network failures; it must not be routed through the retry policy.
+- **§33 roadmap resequenced:** Room and the Compose shell (against the fake provider) land before the Dropbox adapter.
+- **§36:** provider-reported hash validation is the first task of adapter work, not the last.
 
 ## Changes in v1.1
 
@@ -93,6 +119,7 @@ cloudlug/
 ├── core/
 │   ├── model/
 │   ├── database/
+│   ├── hashing/
 │   ├── network/
 │   ├── security/
 │   ├── transfer/
@@ -118,7 +145,7 @@ cloudlug/
     └── threat-model.md
 ```
 
-Provider implementations depend on `providers:api`. The transfer engine depends only on provider abstractions and must never directly depend on Dropbox or Google Drive modules.
+Provider implementations depend on `providers:api`. The transfer engine depends only on provider abstractions and must never directly depend on Dropbox or Google Drive modules. `core/hashing` holds the §19.4 pipeline and every hash algorithm, including provider-defined ones such as Dropbox's block hash; the engine selects an algorithm through `ProviderCapabilities.nativeHashAlgorithm` and never names a provider.
 
 ## 5. Provider Abstraction
 
@@ -131,7 +158,7 @@ interface CloudProvider {
     suspend fun disconnect(account: AccountId)
 
     suspend fun resolveMetadata(account: AccountId, objectId: CloudObjectId): CloudObject
-    suspend fun enumerate(account: AccountId, selection: CloudSelection): Flow<CloudObject>
+    fun enumerate(account: AccountId, selection: CloudSelection, resumeAfter: CloudObjectId? = null): Flow<CloudObject>
     suspend fun quota(account: AccountId): StorageQuota?
 
     suspend fun openDownload(account: AccountId, objectId: CloudObjectId, range: LongRange?): CloudDownload
@@ -163,9 +190,13 @@ data class ProviderCapabilities(
     val uploadChunkAlignment: Long,          // bytes; chunk sizes must be a multiple of this
     val maxUploadChunkBytes: Long,
     val illegalNameCharacters: Set<Char>,
-    val maxNameLength: Int
+    val maxNameLength: Int,
+    val maxPathLength: Int?,
+    val disallowsTrailingSpaceOrDot: Boolean
 )
 ```
+
+`enumerate` is a cold flow, so it is not `suspend`. `resumeAfter` is the ID of the last object the caller persisted; an adapter that cannot resume from an object ID may restart from the beginning, and the manifest builder deduplicates by source object ID (§11).
 
 `lookupDestination` returns a list because some providers (Google Drive) allow multiple siblings with the same name. Capabilities allow the engine to adapt to future providers rather than encoding provider-specific assumptions.
 
@@ -257,6 +288,8 @@ interface CloudSelectionProvider {
 
 `CloudSelection` may represent a single file, multiple files, one or more directories, or a mixed selection, subject to provider capabilities.
 
+Because `CloudObject` carries identity rather than a path (§6), the engine cannot derive a root's ancestors from the object alone. The selection therefore carries, for each root, its destination-relative display path (e.g. `photos/2026/April` for a root the user picked at `/photos/2026/April`). The picker is the only component that knows this, and it is what §10 uses to preserve the tree above the selected roots.
+
 ## 10. Transfer Creation and Path Mapping
 
 After the user selects source objects and a destination folder, CloudLug creates one enclosing destination folder named with the app and transfer date/time.
@@ -285,529 +318,6 @@ CloudLug - 2026-09-17 09-57/
     └── code.py
 ```
 
-Original relative paths are preserved, including empty folders. Independent transfers should not silently merge into the same enclosing folder. The enclosing-folder name uses only characters legal on every supported provider (no `: / \ < > " | ? *`).
+Original relative paths are preserved, including empty folders. Independent transfers must not silently merge into the same enclosing folder: because the name has minute resolution, a second transfer created in the same minute gets a numeric suffix on the enclosing folder (`CloudLug - 2026-09-17 09-57 (2)`). Items inside are never auto-renamed. The enclosing-folder name uses only characters legal on every supported provider (no `: / \ < > " | ? *`).
 
-## 11. Transfer Manifest
-
-Before moving file bytes, CloudLug enumerates the selected objects and persists a logical manifest. The manifest represents what should be transferred independently from what is currently executing, and survives process death. Enumeration is itself resumable (paged, with the page cursor persisted) because large trees can take minutes to walk.
-
-## 12. Persistence Model
-
-### 12.1 TransferEntity
-```
-id, createdAt, updatedAt
-sourceProvider, sourceAccountId
-destinationProvider, destinationAccountId
-destinationRootId, destinationContainerId, destinationContainerName
-status, networkPolicy
-enumerationCursor
-totalFiles, completedFiles, failedFiles, cancelledFiles, skippedFiles, conflictFiles
-totalBytes, completedBytes
-lastErrorCode, lastErrorMessage
-```
-
-### 12.2 TransferItemEntity
-```
-id, transferId
-sourceObjectId, sourceRevision, sourceRelativePath
-filename, mimeType, size, modifiedAt
-objectKind                     (FILE | FOLDER | PROVIDER_NATIVE_DOCUMENT | SHORTCUT)
-sourceProviderHash
-computedSha256
-computedDestinationNativeHash
-destinationParentId, destinationObjectId, destinationRelativePath
-status, statusReason
-downloadedBytes, uploadedBytes
-uploadSessionId, uploadSessionMetadata, uploadSessionExpiresAt
-retryCount, lastErrorCode, lastErrorMessage
-createdAt, updatedAt
-```
-
-### 12.3 CacheChunkEntity
-```
-id, transferItemId
-offset, length
-localFilename
-hash
-status
-createdAt
-```
-
-### 12.4 AccountEntity
-Store only non-secret account metadata in Room (display name, email, granted scopes, provider account ID). Credentials are kept separately in secure storage.
-
-## 13. State Machines
-
-### 13.1 Transfer
-```
-DRAFT -> PREPARING -> READY -> RUNNING
-                                 |-> PAUSED
-                                 |-> WAITING_FOR_WIFI
-                                 |-> WAITING_FOR_STORAGE
-                                 |-> AUTH_REQUIRED
-                                 |-> FAILED
-                                 |-> CANCELLED
-                                 `-> COMPLETED / COMPLETED_WITH_ERRORS
-```
-
-### 13.2 File
-```
-PENDING
-  -> CHECKING_DESTINATION
-       -> SKIPPED_DUPLICATE
-       -> SKIPPED_UNSUPPORTED
-       -> CONFLICT
-       -> SOURCE_CHANGED
-       -> DOWNLOADING -> CACHED -> UPLOADING -> VERIFYING -> COMPLETED
-
-Any active state -> FAILED or CANCELLED
-```
-
-- **CONFLICT**: destination object exists and is not provably identical. Terminal in v1; the user can retry after removing the destination object.
-- **SKIPPED_UNSUPPORTED**: the object cannot be transferred as bytes (e.g. a Google-native document with export disabled, a Drive shortcut) — see §20.
-- **SOURCE_CHANGED**: the source revision at download time differs from the manifest revision. Terminal for this run; "Retry incomplete files" re-enumerates and picks up the new revision.
-
-State transitions should be transactional in Room and illegal transitions should be unit-tested.
-
-## 14. Transfer Pipeline
-
-```
-Cloud A
-  |
-  v
-Download producer
-  |
-  v
-Persistent bounded chunk cache
-  |
-  v
-Upload consumer
-  |
-  v
-Cloud B
-```
-
-Download and upload may overlap within a file. The producer applies backpressure when the cache reaches its high-water mark; the uploader deletes chunks only after they are no longer needed for recovery (i.e. the destination has acknowledged the byte range in `queryUpload` or `uploadChunk`).
-
-## 15. Chunk and Storage Strategy
-
-Do not make 50% of free storage the chunk size. Use small provider-compatible network chunks inside a bounded persistent cache.
-
-```
-cacheBudget = min(usableStorage * 0.50, configuredMaximumCache)
-
-initial configuredMaximumCache = 5 GiB
-initial networkChunkSize      = 8 MiB
-```
-
-8 MiB is a multiple of Google Drive's 256 KiB resumable-upload granularity and Dropbox's 4 MiB `content_hash` block size, so one chunk size satisfies both providers and lets the Dropbox native hash be computed per chunk. Provider adapters may change chunk size or alignment according to `uploadChunkAlignment` / `maxUploadChunkBytes`.
-
-### 15.1 Emergency reserve
-```
-usableStorage = freeSpace - max(1 GiB, totalDeviceStorage * 0.05)
-```
-
-Before allocating another chunk, CloudLug ensures the required bytes plus reserve remain available. If storage is constrained, stop downloading and let the uploader drain the cache; if the cache is already empty and space is still insufficient, enter `WAITING_FOR_STORAGE`.
-
-### 15.2 Cache location and backup exclusion
-```
-<filesDir or cacheDir>/cloudlug-cache/
-└── <transfer-id>/
-    └── <item-id>/
-        ├── 00000000.chunk
-        ├── 00000001.chunk
-        └── ...
-```
-
-Use `filesDir` (not `cacheDir`) so the OS does not evict chunks mid-transfer. Temporary file contents must not be placed in shared storage. Declare `android:fullBackupContent` / `android:dataExtractionRules` excluding the cache directory and the encrypted-credential store; auto-backup of the Room database is acceptable only if credentials are provably not in it.
-
-### 15.3 Chunk lifecycle
-```
-ALLOCATED -> DOWNLOADING -> READY -> UPLOADING -> ACKNOWLEDGED -> DELETED
-```
-
-## 16. Network Policy
-
-The default is Wi-Fi/unmetered networks only. Cellular transfers require explicit user opt-in. Internally model this as network policy rather than assuming all Wi-Fi is unmetered.
-
-```kotlin
-enum class TransferNetworkPolicy { UNMETERED_ONLY, ANY_NETWORK }
-```
-
-If a transfer running under `UNMETERED_ONLY` loses its allowed network, it transitions to `WAITING_FOR_WIFI` and automatically resumes when an allowed network returns. It must never silently fall back to cellular. Express the policy as a JobScheduler/WorkManager network constraint so the platform enforces it too.
-
-## 17. Android Background Execution
-
-On API 34+, use User-Initiated Data Transfer jobs (`JobInfo.Builder.setUserInitiated(true)` with `setEstimatedNetworkBytes`) for long-running transfers, with a visible notification and the network constraint from §16. UIDT exists precisely because Android 14 caps `dataSync` foreground services at roughly 6 hours per 24-hour window, which a multi-hundred-gigabyte migration will exceed. Persist all state because Android may still terminate the process.
-
-On API 26–33, use a WorkManager long-running worker with a `dataSync` foreground service. Correctness must never depend on any worker staying alive.
-
-Request the user disable battery optimization for CloudLug only if telemetry-free beta testing shows it is required; do not demand it by default.
-
-## 18. Concurrency
-
-Start conservatively with one active file, one download producer, and one upload consumer. Within a file, downloading chunk N+1 while uploading chunk N is the main throughput win and is safe with resumable uploads. Later versions may permit a small number of concurrent files based on device conditions and provider capabilities. More concurrency must not be assumed to be faster on a mobile device.
-
-For trees with many small files, per-file API round trips dominate; measure before optimizing, and prefer batching metadata calls over file-level parallelism.
-
-## 19. Idempotency, Duplicate Detection, and Hashing
-
-### 19.1 Separate two concepts
-- **Transfer idempotency**: did CloudLug already transfer this exact source object?
-- **Content duplication**: does equivalent content already exist at the destination?
-
-### 19.2 Idempotency record
-```
-source provider, source account, source object ID, source revision, source size, source hash
-destination object ID, destination path
-```
-
-Completed items are never blindly retransferred. On retry, CloudLug verifies destination existence/identity where practical and skips valid completed items.
-
-### 19.3 Destination collision algorithm
-```
-lookupDestination(parent, name)
-  no match           -> upload
-  multiple matches   -> CONFLICT
-  one match:
-    size differs     -> CONFLICT
-    size equal:
-      strong hash available on both sides and equal   -> SKIPPED_DUPLICATE
-      strong hash available on both sides and differs -> CONFLICT
-      no comparable hash                              -> CONFLICT
-```
-
-CloudLug never automatically overwrites a conflict. Renaming conflicts (e.g. `name (1).ext`) may be added later as an explicit user choice.
-
-### 19.4 Hashing
-The hash pipeline runs once, incrementally, as bytes pass through the phone. It computes:
-
-- a provider-independent **SHA-256** of the whole object, and
-- the **destination provider's native hash**, so verification after upload is a metadata comparison:
-  - Dropbox: `content_hash` = SHA-256 of the concatenated SHA-256 digests of each 4 MiB block.
-  - Google Drive: MD5 (`md5Checksum`); the v3 API also reports `sha1Checksum` / `sha256Checksum`, so store SHA-256 and compare whichever is returned.
-
-Do not reread a multi-gigabyte cached object merely to hash it. Source provider hashes are used opportunistically for pre-download duplicate detection when the algorithms are comparable (Dropbox → Drive: they are not; the source hash is only useful for detecting source changes).
-
-### 19.5 EXIF
-EXIF is optional supplemental metadata, not the primary identity mechanism. It may later help identify likely photo duplicates with different filenames, but exact content hashes and durable transfer state are stronger.
-
-## 20. Provider-Specific Semantics
-
-The engine stays provider-agnostic, but the manifest must record how each object will be handled so the user sees it in the review step.
-
-### 20.1 Google-native documents
-Docs, Sheets, Slides, Drawings, Forms, etc. have no byte stream and report `size = null`. Policy:
-- Default: `SKIPPED_UNSUPPORTED` with reason "Google-native document".
-- Optional setting: export on transfer (Docs → `.docx`, Sheets → `.xlsx`, Slides → `.pptx`, others → PDF). Exported files have no source hash and no stable size before export; verification is by destination native hash of the exported bytes. Export is capped by Google at ~10 MB per file; larger documents fall back to `SKIPPED_UNSUPPORTED`.
-
-### 20.2 Shortcuts and links
-Drive shortcuts (`application/vnd.google-apps.shortcut`) are not followed. They are `SKIPPED_UNSUPPORTED`. Dropbox has no equivalent object.
-
-### 20.3 Same-name siblings
-Google Drive permits multiple children with identical names in one folder. Dropbox does not, and its paths are case-insensitive. When mapping a Drive source tree to a Dropbox destination, siblings that collide case-insensitively are `CONFLICT` at manifest time, before any bytes move.
-
-### 20.4 Name legality
-Providers differ on illegal characters, trailing spaces/dots, and maximum name/path length. Names that cannot be represented at the destination are `CONFLICT` at manifest time with a reason. v1 does not auto-rename.
-
-### 20.5 Empty folders
-Empty source folders are created at the destination so the tree is preserved.
-
-### 20.6 Source changed during transfer
-`resolveMetadata` is called immediately before `openDownload`. If the revision differs from the manifest, the item becomes `SOURCE_CHANGED`. CloudLug does not silently transfer a newer version than the user reviewed.
-
-### 20.7 Destination quota preflight
-Before `READY`, compare `totalBytes` against `quota(destinationAccount)`. If insufficient, refuse to start with a clear message rather than failing mid-transfer.
-
-### 20.8 Shared drives and shared-with-me
-v1 supports only "My Drive" as a Drive destination. Shared drives require `supportsAllDrives` handling and different quota semantics; defer.
-
-## 21. Verification
-
-A successful upload API response is not by itself sufficient to mark an item `COMPLETED`. Use the strongest available destination verification, in order:
-
-1. Destination native hash returned by `finishUpload` equals the locally computed native hash.
-2. If the provider omits the hash from the finish response, `resolveMetadata` on the new object and compare.
-3. Size match plus provider integrity signal.
-4. Metadata confirmation only (existence, size) — permitted only when capabilities declare `supportsServerHash = false`, and the item is flagged "verified by size only" in history.
-
-`COMPLETED` means destination verification succeeded.
-
-## 22. Pause, Cancel, Retry
-
-### 22.1 Pause
-1. Stop scheduling new downloads.
-2. Stop scheduling new upload chunks.
-3. Safely finish or cancel current requests.
-4. Persist upload-session state (including expiry).
-5. Retain useful cached chunks.
-6. Set transfer to `PAUSED`.
-
-### 22.2 Cancel one file
-1. Cancel active network calls for that item.
-2. Abort its resumable destination session when appropriate.
-3. Remove incomplete destination artifacts where safely possible.
-4. Delete its local chunks.
-5. Set item to `CANCELLED`.
-6. Continue other items.
-
-### 22.3 Cancel transfer
-1. Stop all transfer workers.
-2. Abort active network operations.
-3. Clean incomplete destination sessions where possible.
-4. Remove all local chunks for unfinished work.
-5. Retain history/manifest.
-6. Mark unfinished items `CANCELLED`.
-7. Mark transfer `CANCELLED`.
-
-Already completed destination files remain untouched.
-
-### 22.4 Retry incomplete files
-The UI should prefer "Retry incomplete files" over "Restart". Retry re-evaluates the manifest, verifies completed items, and retries pending, failed, cancelled, or source-changed items without blindly duplicating completed work.
-
-### 22.5 Upload-session expiry
-Resumable sessions expire (Google: about one week; Dropbox: about 7 days). `uploadSessionExpiresAt` is persisted; on resume, an expired session is abandoned and the item restarts from its cached chunks, never from a partially written destination object.
-
-## 23. Retry Policy
-
-| Condition | Handling |
-|---|---|
-| HTTP 408, 429, 5xx, timeouts, connection resets, DNS failures | Exponential backoff with jitter; honor `Retry-After`. |
-| Google 403 with reason `userRateLimitExceeded`, `rateLimitExceeded`, `dailyLimitExceeded` | Treat as throttling, not as a permanent error. |
-| Google 403 `storageQuotaExceeded`, Dropbox `insufficient_space` | `WAITING_FOR_STORAGE`-style hold with user message; not retried automatically. |
-| 401, or a refresh that returns `invalid_grant` | `AUTH_REQUIRED`; never loop. Expected during beta if the Google OAuth app is in Testing status (7-day refresh-token expiry). |
-| Permanent provider errors (404 on source, 400 malformed) | Item `FAILED` with a user-readable reason. |
-
-Backoff caps at a few minutes per attempt; a bounded retry count moves the item to `FAILED` so the transfer can finish `COMPLETED_WITH_ERRORS`.
-
-## 24. User Experience
-
-### 24.1 Home
-```
-CloudLug                                  [+ New Transfer]
-
-Active
-  Dropbox -> Google Drive
-  ████████████░░░  74%
-  1,103 / 1,482 files
-
-History
-  Google Drive -> Dropbox     Completed   Sep 14 • 843 files
-  Dropbox -> Google Drive     3 failed    Sep 11 • 2,140 files
-```
-
-### 24.2 New Transfer Wizard
-1. Choose source provider/account (only accounts with read capability).
-2. Choose destination provider/account; same provider is disabled.
-3. Use source picker to select files/folders.
-4. Use destination picker to select the parent destination folder.
-5. Review size, file count, items to be skipped or in conflict (§20), network policy, available local storage, destination quota, cache limit, and destination enclosing folder.
-6. Start transfer.
-
-### 24.3 Transfer Detail
-```
-Dropbox -> Google Drive
-██████████████░░░░  72%
-1,068 / 1,482 files
-31.4 / 43.7 GB
-
-photos/
-  2025/
-    ✓ photo1.png
-    ✓ photo2.png
-    → summer.jpg
-    ○ beach.jpg
-
-CURRENT FILE
-summer.jpg
-381 MB / 742 MB
-
-Dropbox        Phone        Google Drive
-  ●  ======>    ●  ------>     ○
-Downloading
-
-[Cancel File]
-[Pause Transfer]   [Cancel Transfer]
-```
-
-During upload, the highlighted arrow changes from source→phone to phone→destination. During verification, neither transfer arrow is active and the destination is highlighted.
-
-### 24.4 Notifications
-The active notification shows provider direction, aggregate progress, current filename, and pause/cancel controls. Waiting states explicitly say why the transfer is paused, such as waiting for Wi-Fi. Failures surface a review action.
-
-## 25. Privacy Model
-
-Recommended user-facing statement:
-
-> "CloudLug has no transfer servers. Files are transferred directly between your selected cloud providers through your Android device."
-
-Do not claim that nobody except the user can access the files, because the source and destination providers necessarily can. Do not claim end-to-end encryption unless CloudLug later introduces an actual E2EE file format.
-
-## 26. Logging and Diagnostics
-
-Logs must never contain access tokens, refresh tokens, authorization codes, file contents, or `Authorization` headers. Implement this as a single OkHttp interceptor plus a log-sink redactor rather than per-call discipline. Prefer opaque internal identifiers over filenames. Debug logging of filenames should be opt-in.
-
-No automatic remote logging in v1. Provide an explicit "Export diagnostic report" function that produces a sanitized, user-reviewable text or JSON report.
-
-## 27. Analytics
-
-Recommended v1 policy: no Firebase Analytics, advertising SDK, third-party crash reporter, or behavioral telemetry. Use Play Console aggregate diagnostics, explicit diagnostic exports, and GitHub issues.
-
-## 28. Threat Model
-
-| Threat | Mitigation |
-|---|---|
-| Stolen unlocked phone | Android sandbox; Keystore; optional biometric app lock later. |
-| Rooted/compromised device | Document that CloudLug cannot guarantee credential confidentiality on a compromised OS. |
-| Malicious APK modification | Publish reproducible-build guidance where practical. |
-| OAuth redirect interception | PKCE plus verified App Links / claimed-scheme validation against pending state. |
-| Token leakage | Central log/header redaction. |
-| Cache remnants | Delete chunks immediately when no longer needed; recursively clean cache after completion/cancellation and on app start. |
-| Destination overwrite | Never overwrite automatically. |
-| Replay after crash | Stable manifest, stable destination identity where available, and verification. |
-| MITM | TLS/HTTPS only; Network Security Config with cleartext disabled; never bypass certificate validation. |
-
-## 29. Google Play and Privacy Compliance
-
-CloudLug accesses personal/sensitive data because cloud files and authentication credentials are involved. The published privacy policy and Google Play Data Safety declaration must accurately reflect the actual binary and all included dependencies.
-
-Privacy policy should state that CloudLug operates no server that receives, stores, inspects, or transfers cloud files; selected files may be temporarily cached in private application storage; credentials are stored locally using Android security facilities; data is not sold; and cloud file contents are not used for advertising, profiling, analytics, or AI training.
-
-Google's OAuth verification also requires a hosted privacy policy, a homepage, and a demonstration video of the consent flow; budget time for this before public beta.
-
-## 30. Open-Source Project
-
-Choose an OSI-approved license based on desired downstream restrictions; Apache-2.0 is a strong permissive default, while GPL-3.0 provides stronger copyleft.
-
-Never commit signing keys, Play credentials, test-account credentials, or secrets. Mobile OAuth client identifiers should be treated as public identifiers, not secrets. Provider registration instructions belong in development documentation so contributors can use their own provider applications — this is also the documented path to Google Drive as a *source* for self-builders (§8.2).
-
-```
-README.md
-LICENSE
-CONTRIBUTING.md
-SECURITY.md
-PRIVACY.md
-CODE_OF_CONDUCT.md
-docs/
-├── architecture.md
-├── transfer-engine.md
-├── provider-api.md
-├── persistence.md
-├── oauth.md
-├── security.md
-├── threat-model.md
-├── privacy.md
-└── testing.md
-```
-
-## 31. Testing Strategy
-
-### 31.1 Unit tests
-Test legal and illegal transfer/item state transitions, cache accounting, collision logic (including multiple-match and case-insensitive collisions), network-policy transitions, retries, both hash algorithms against known vectors, and cleanup.
-
-### 31.2 Provider contract tests
-Every provider adapter should pass the same behavioral contract for authentication, enumeration (paged), quota, download/range download where supported, folder creation, upload, resume, session expiry, lookup (including multi-match), metadata, hashing behavior, and abort.
-
-### 31.3 FakeCloudProvider
-Build `FakeCloudProvider` before real provider integrations. It should simulate network disconnect after N bytes, 429, 500, 403 rate-limit reasons, token expiration, corrupt chunks, destination conflicts, duplicate-name siblings, provider-native documents, expired upload sessions, provider timeouts, process interruption, slow source, slow destination, and unsupported capabilities.
-
-### 31.4 Crash/recovery tests
-- Kill process during enumeration.
-- Kill process during download.
-- Kill process during upload.
-- Kill process during verification.
-- Reboot during upload.
-- Remove and restore Wi-Fi.
-- Switch to cellular while cellular is forbidden.
-- Fill local storage.
-- Expire/revoke OAuth credentials.
-- Expire the resumable upload session.
-
-Every scenario must converge to a valid state without overwriting destination data.
-
-## 32. Engineering Invariants
-
-1. CloudLug never deletes source data.
-2. CloudLug never overwrites an existing destination object automatically.
-3. `COMPLETED` means destination verification succeeded.
-4. A cached chunk is deleted only when it is no longer needed for recovery.
-5. No transfer occurs over a network disallowed by the transfer policy.
-6. An interrupted transfer can be safely retried.
-7. Provider-specific behavior never leaks into the core transfer engine.
-8. No CloudLug-operated remote system receives user file contents or cloud credentials.
-9. Every object in the manifest ends in exactly one terminal state with a recorded reason.
-
-## 33. MVP Roadmap
-
-| Milestone | Scope |
-|---|---|
-| v0.1 — Core architecture | Room model, state machines, provider API, `FakeCloudProvider`, cache manager, dual-hash pipeline, Compose navigation/screens. |
-| v0.2 — Dropbox adapter | Dropbox as source and destination (both directions implemented even though same-provider transfers remain prohibited). |
-| v0.3 — Google Drive destination | Drive adapter with `drive.file` only: folder creation, resumable upload, verification via `md5Checksum`/`sha256Checksum`. **Dropbox → Drive works end to end.** |
-| v0.4 — Recovery hardening | Process death, network loss, resumability, session expiry, duplicate prevention, storage pressure, throttling/rate limits. |
-| v0.5 — Security review | OAuth, Keystore, logging, cache cleanup, backup rules, network configuration, dependencies. |
-| v0.6 — Public beta | Move the Google OAuth app to Production status (non-restricted verification). Small Google Play testing cohort; collect bug reports without adding file/content telemetry. |
-| v1.0 — Stable release | **Dropbox → Google Drive.** Only after large real-world migrations and repeated failure-injection tests complete reliably. |
-| v1.x — Drive as source | Drive enumeration/download behind `canBeSource`. Ship first as a documented self-build path (own OAuth client, `drive.readonly`). Pursue restricted-scope verification + CASA for the Play build only if maintainer capacity allows. |
-
-## 34. Future Providers and Features
-
-### 34.1 Providers
-- Microsoft OneDrive
-- Box
-- WebDAV / Nextcloud
-- S3-compatible storage
-- Backblaze B2
-- pCloud
-- Proton Drive
-
-### 34.2 Features
-- Controlled parallel transfers
-- Charging-only transfers
-- Battery threshold
-- Maximum bandwidth
-- Provider-to-local backup
-- Local-to-provider upload
-- Transfer manifest export
-- Conflict auto-rename as an explicit option
-- Photo duplicate analysis
-- Multiple accounts per provider
-- Transfer estimates
-- Per-provider rate-limit tuning
-- Google shared-drive support
-
-Do not add synchronization casually. Synchronization introduces materially different conflict, deletion, and reconciliation semantics.
-
-## 35. Architectural Summary
-
-```
-Compose UI
-    |
-Transfer Controller
-    |
-Transfer Engine
-    |-- state machine
-    |-- cache manager
-    |-- integrity verifier (dual hash)
-    |-- network policy
-    |-- retry engine
-    |
-    +--> CloudProvider A adapter
-    |
-    +--> CloudProvider B adapter
-    |
-Room / Keystore / private local cache
-```
-
-The core rule is simple: the transfer engine knows that bytes move from CloudProvider A to CloudProvider B. It does not know what Dropbox, Google Drive, OneDrive, Box, S3, WebDAV, or any future provider is. That boundary is what allows CloudLug to evolve from a Dropbox/Drive migration utility into a general-purpose, privacy-oriented cloud migration application.
-
-## 36. Early Technical Validation Items
-
-- **Confirm current Google scope classifications and CASA requirements** against developers.google.com and the App Defense Alliance CASA tiering page before writing any Drive code.
-- Prototype `drive.file` behavior end to end: create folder, upload, read back metadata/hash, and confirm it works for objects CloudLug created after an app reinstall.
-- Validate Dropbox and Drive resumable-upload semantics, chunk alignment, session expiry, and recovery behavior.
-- Validate `content_hash` and MD5/SHA-256 computation against provider-reported values on real uploads.
-- Validate UIDT behavior across Android 14+ and WorkManager/foreground fallback on older supported Android versions, including the `dataSync` time limit.
-- Measure thermal, battery, and throughput characteristics on large transfers before increasing concurrency.
-- Validate cache cleanup after force-stop, process death, reboot, cancellation, and low-storage events.
-- Test Google-native-document export sizes and the ~10 MB export cap.
+The enclosing folder is created at the `READY → RUNNING` transition, not during `PREPARING`. The destination picker has already shown the folder is browsable and §20.7 has shown there is space; if creation fails at start, the trans
