@@ -133,21 +133,29 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      # Without hardware acceleration the emulator boots by software rendering
+      # and will not finish inside any reasonable timeout. Three boot timeouts
+      # were diagnosed blind before this step existed; if the next one fails,
+      # this says whether acceleration was actually available.
+      - name: Report virtualisation support
+        run: |
+          echo "CPU virtualisation flags: $(grep -c -E '(vmx|svm)' /proc/cpuinfo || echo 0)"
+          ls -l /dev/kvm || echo "NO /dev/kvm — the emulator cannot be accelerated"
+
       - name: Run the smoke test on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          # API 34 rather than 36: it still exercises the UIDT path §17 targets
-          # and its system images are the best-seeded on CI. minSdk 26 coverage
-          # belongs with the §31.4 recovery work in v0.5.
-          #
-          # Everything else here is the action's own documented configuration,
-          # deliberately. The first attempt set `profile: pixel_6` and
-          # `ram-size: 4096M` and omitted `-no-snapshot-save`; the emulator never
-          # booted ("Timeout waiting for emulator to boot"). Those were three
-          # untested choices on a path that cannot be run locally, so this keeps
-          # to the combination the action documents and exercises.
-          api-level: 34
-          target: google_apis
+          # `default`, not `google_apis`: CloudLug uses no Play services at all
+          # — §3 names none and §27 rules out the analytics they usually carry —
+          # so the Play image only adds boot time to a test that launches one
+          # activity. API 30 for the same reason: this test asserts the app
+          # starts and Room opens, which every supported API does identically,
+          # and the §17 UIDT behaviour that would justify 34+ is v0.5 work with
+          # its own §31.4 scenarios. Earlier runs chose 34/google_apis on my
+          # reasoning about what to cover rather than what this test needs, and
+          # the emulator timed out three times without booting.
+          api-level: 30
+          target: default
           arch: x86_64
           force-avd-creation: false
           disable-animations: true
