@@ -58,8 +58,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # `packages` is set explicitly because the action's default list still
+      # contains the obsolete `tools` package, which no longer exists in the SDK
+      # repository — sdkmanager exits 1 with "Failed to find package 'tools'"
+      # before Gradle runs at all. Naming what the build actually needs also
+      # pins the platform rather than relying on the runner image.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
