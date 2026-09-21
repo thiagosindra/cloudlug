@@ -697,3 +697,48 @@ authoritative.
 **What changes it.** If the engine ever runs items concurrently, "the item that
 was in flight" stops being singular and the re-read has to move into whatever
 owns per-item lifecycle. The rules survive; their home does not.
+
+## ADR-0028 — The accounts screen, and the order disconnection happens in
+
+**Status.** Accepted in v0.3, pending spec ratification. Proposed §24.5 text is
+in `docs/spec-proposals/v1.4.md`.
+
+**Context.** §4 has listed `feature/accounts/` since v1.0. §24 describes Home,
+the wizard and the transfer detail, and never describes an accounts screen — so
+the module has been in the tree diagram for three revisions with no specified
+behaviour. That was invisible while both providers were fakes wired in by Hilt.
+It stopped being invisible the moment a real adapter needed somewhere for a user
+to connect, and §8.3 needed somewhere for them to disconnect.
+
+**Decision.** A minimal accounts screen, reachable from Home, with one row per
+supported provider showing connected state and offering Connect and Disconnect.
+
+Two alternatives were considered and rejected. **Connecting inline from the
+wizard** needs no new screen, but leaves no way to disconnect, which makes §8.3
+unimplementable. **Deferring to v0.4** would have meant shipping a v0.3 whose
+only way to revoke a grant was to uninstall the app.
+
+**Disconnect revokes before it forgets.** The provider's tokens are revoked
+first (§8.3), and the stored credentials are removed only once that succeeds.
+The other order is worse in the case that matters: if removal came first and
+revocation then failed, a live grant would remain on the provider that CloudLug
+no longer holds the tokens to revoke, and the user's only recourse would be the
+provider's own website. Revoking first can leave a credential that is already
+dead, which the next use discovers and clears.
+
+**Roles come from `grantedScopes`, and so does the explanation.** §7 makes the
+granted scopes decide whether an account can act as source, destination, or
+both. A user who declines a scope at the consent screen would otherwise see a
+role quietly missing with no way to find out why, so the row names the missing
+scope. A disabled control that cannot explain itself is a bug report waiting to
+be filed.
+
+**Disconnecting an account with work in flight warns first**, names the
+transfers, and on confirmation moves them to `AUTH_REQUIRED` rather than
+`FAILED` — §13.1 already has that edge, and reconnecting the account resumes
+them. Failing them would discard a manifest and cached chunks that are still
+perfectly good.
+
+**What changes it.** If a provider is ever added whose grant cannot be revoked
+programmatically, the revoke-then-forget order has nothing to revoke, and the
+screen has to say so rather than implying a revocation happened.
