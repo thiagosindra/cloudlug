@@ -1,0 +1,84 @@
+# Manual only. The §31.2 contract suite against a real Dropbox account.
+#
+# Never runs on push or pull_request. It needs a live credential and the
+# network, and it creates and deletes objects — none of which belongs in a
+# check that gates every commit. The same suite runs against the fake on every
+# push, so what this adds is the one thing a fake cannot: whether Dropbox
+# actually behaves the way the adapter claims.
+name: Dropbox live contract tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_root:
+        description: "Folder the suite may create and delete inside. Never the account root."
+        required: true
+        default: "/cloudlug-contract-tests"
+        type: string
+
+jobs:
+  contract:
+    name: §31.2 against a real account
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Both checks fail in seconds with a reason. Without the token the suite
+      # would skip all 19 tests and report success, which looks exactly like a
+      # passing run — the failure mode this job exists to avoid.
+      - name: Require the credential and a safe root
+        env:
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_TEST_ROOT: ${{ inputs.test_root }}
+        run: |
+          if [ -z "$DROPBOX_REFRESH_TOKEN" ]; then
+            echo "::error::The DROPBOX_REFRESH_TOKEN repository secret is not set. Mint one with :tools:dropbox-auth:dropboxAuth."
+            exit 1
+          fi
+          case "$DROPBOX_TEST_ROOT" in
+            /?*) ;;
+            *) echo "::error::DROPBOX_TEST_ROOT must be an absolute path below the account root, got '$DROPBOX_TEST_ROOT'."; exit 1 ;;
+          esac
+
+      # The credential reaches the JVM through the environment only — never a
+      # file, never a Gradle property. Actions masks secret values in logs, and
+      # §26's interceptor keeps tokens and paths out of what the adapter prints.
+      - name: Run the contract suite
+        env:
+          DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+          DROPBOX_TEST_ROOT: ${{ inputs.test_root }}
+        run: ./gradlew :providers:dropbox:test --console=plain --stacktrace
+
+      # A run that skipped everything is not a passing run. The suite is opt-in
+      # by design, so the one thing this job must prove is that the opt-in took.
+      - name: Fail if the live tests only skipped
+        if: always()
+        run: |
+          report=providers/dropbox/build/test-results/test/TEST-dev.thiagosindra.cloudlug.provider.dropbox.DropboxContractLiveTest.xml
+          if [ ! -f "$report" ]; then
+            echo "::error::No contract-test report was produced."
+            exit 1
+          fi
+          skipped=$(grep -o 'skipped="[0-9]*"' "$report" | head -1 | tr -dc '0-9')
+          total=$(grep -o 'tests="[0-9]*"' "$report" | head -1 | tr -dc '0-9')
+          echo "$skipped of $total live contract tests were skipped."
+          if [ "$skipped" = "$total" ]; then
+            echo "::error::Every live test skipped, so nothing ran against Dropbox."
+            exit 1
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dropbox-live-contract
+          path: providers/dropbox/build/reports/tests/**
