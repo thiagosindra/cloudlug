@@ -33,11 +33,24 @@ import javax.crypto.spec.GCMParameterSpec
  * that happens the stored bytes are permanently unreadable, and the honest
  * answer is "there is no credential here", which sends the user through §8.1's
  * flow again. Throwing would turn a recoverable reconnect into a crash.
+ *
+ * ### ...and why it says so on the way out
+ *
+ * Returning null quietly would make three different situations identical to
+ * everything above this class: nothing was ever stored, the Keystore key was
+ * destroyed, and someone edited the preferences file. The recovery is the same
+ * for all three — reconnect — but they are not the same event, and the last one
+ * is worth noticing. So each unreadable credential is announced to a
+ * [SecretStoreListener], which by default logs at warning level. The
+ * announcement carries the storage key and a failure class and nothing else:
+ * §26 forbids logging credential material, and there is no diagnostic value in
+ * it anyway.
  */
 class KeystoreSecretStore(
     context: Context,
     private val preferencesName: String = DEFAULT_PREFERENCES,
     private val keyAlias: String = DEFAULT_KEY_ALIAS,
+    private val listener: SecretStoreListener = SecretStoreListener.Logging,
 ) : SecretStore {
 
     private val preferences: SharedPreferences =
@@ -57,15 +70,32 @@ class KeystoreSecretStore(
     }
 
     override fun get(key: String): String? {
+        // Absent is absent: no listener, no log. Every caller starts here on a
+        // fresh install, and a warning on the ordinary path teaches people to
+        // ignore the warning.
         val stored = preferences.getString(key, null) ?: return null
+
+        val payload = runCatching { Base64.decode(stored, Base64.NO_WRAP) }.getOrNull()
+        if (payload == null || payload.size <= IV_BYTES) {
+            return unreadable(key, UnreadableReason.Malformed)
+        }
+
+        // Deliberately *not* secretKey(): that one generates a key when none is
+        // found, which here would manufacture a key incapable of reading the
+        // bytes beside it and report the destroyed key as a failed tag — the
+        // precise confusion this reporting exists to avoid.
+        val cipherKey = existingKey() ?: return unreadable(key, UnreadableReason.KeystoreKeyMissing)
+
         return runCatching {
-            val payload = Base64.decode(stored, Base64.NO_WRAP)
-            if (payload.size <= IV_BYTES) return@runCatching null
             val cipher = Cipher.getInstance(TRANSFORMATION).apply {
-                init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(TAG_BITS, payload, 0, IV_BYTES))
+                init(Cipher.DECRYPT_MODE, cipherKey, GCMParameterSpec(TAG_BITS, payload, 0, IV_BYTES))
             }
             String(cipher.doFinal(payload, IV_BYTES, payload.size - IV_BYTES), Charsets.UTF_8)
-        }.getOrNull()
+        }.getOrElse { failure ->
+            // The class name, never the message: an exception's message is
+            // written by someone else and could carry anything.
+            unreadable(key, UnreadableReason.DecryptionFailed(failure.javaClass.simpleName))
+        }
     }
 
     override fun remove(key: String) {
@@ -79,9 +109,20 @@ class KeystoreSecretStore(
         runCatching { keyStore.deleteEntry(keyAlias) }
     }
 
+    private fun unreadable(key: String, reason: UnreadableReason): String? {
+        listener.onUnreadableSecret(key, reason)
+        return null
+    }
+
+    /** The stored key, or null when there is none; never creates one. */
+    private fun existingKey(): SecretKey? =
+        runCatching { keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry }
+            .getOrNull()
+            ?.secretKey
+
     /** Generated on first use and reused thereafter; never leaves Keystore. */
     private fun secretKey(): SecretKey {
-        (keyStore.getEntry(keyAlias, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        existingKey()?.let { return it }
 
         val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         generator.init(
