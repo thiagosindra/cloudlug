@@ -24,6 +24,7 @@ include(
     ":core:model",
     ":core:database",
     ":core:hashing",
+    ":core:network",
     ":core:storage",
     ":core:transfer",
     ":providers:api",

@@ -10,7 +10,13 @@ HTTP status it arrived with, which the mapping needs and JSON cannot carry.
 
 | File | Route | Status | Expected mapping (§23) |
 | --- | --- | --- | --- |
-| `upload_insufficient_space_409.json` | `/2/files/upload` | 409 | `CloudErrorKind.INSUFFICIENT_SPACE`, permanent |
+| `upload_insufficient_space_409.json` | `/2/files/upload` | 409 | `CloudErrorKind.DESTINATION_STORAGE_FULL` |
+
+§23 is specific about this one: Dropbox `insufficient_space` is a
+`WAITING_FOR_STORAGE`-style hold with a user message, **not retried
+automatically** and not a permanent item failure. An earlier revision of this
+table called it permanent, which would have failed the transfer instead of holding it
+for the user to free space and resume.
 
 ## Provenance
 
