@@ -125,21 +125,49 @@ counter (§11).
    the transfer stuck in `RUNNING`. Cancelling one file stopped all of them.
    Unreachable without a slow source, which is exactly why v1.3 made these
    injections normative.
-2. **No background execution.** §17's UIDT on API 34+ and the WorkManager
+2. **Dropbox enumeration re-walks the whole tree after process death.** §11
+   resumes from the last object id the caller persisted, and the Dropbox
+   adapter honours that by starting the walk again and discarding entries until
+   it passes the anchor. Correct — §5 says an adapter that cannot resume from
+   an object id may restart, because the manifest deduplicates by source object
+   id — but not free.
+
+   The cost is user-facing. A 50,000-file tree is roughly a hundred
+   `list_folder` pages that emit nothing, paid in full on every resume, against
+   the same rate limit budget as useful work. On a phone that woke, resumed and
+   was killed again, it is paid repeatedly.
+
+   Dropbox's own `list_folder` cursor is built for this, and persisting it would
+   make a resume O(remaining) instead of O(tree). It cannot simply be threaded
+   through the contract: ADR-0015 removed `CloudSelection.resumeCursor`
+   deliberately, and re-adding opaque provider state would reverse that. The
+   adapter could instead keep a private cursor cache keyed by the resume anchor,
+   leaving the contract's object-id resume as the only thing the engine knows
+   about, and falling back to a full walk whenever Dropbox invalidates the
+   cursor. **v0.5 recovery hardening**, alongside §31.4.
+
+   Writing this up found a real defect, now fixed and covered by the §31.2
+   contract suite: if the resume anchor no longer existed — deleted at the
+   source, or moved out of the selection — both providers skipped until an id
+   that would never arrive and emitted **nothing**, producing a manifest that
+   looked complete with no work in it. Silent, and indistinguishable from
+   success. Both now fall back to a full walk.
+
+3. **No background execution.** §17's UIDT on API 34+ and the WorkManager
    fallback below it are not implemented. A transfer runs in an
    application-scoped coroutine and dies with the process; the database makes
    that recoverable, but the OS may stop a long transfer. v0.5.
-3. **No notification.** §24.4 specifies an ongoing notification with progress
+4. **No notification.** §24.4 specifies an ongoing notification with progress
    and controls. It arrives with the background work it belongs to.
-4. **The pipeline is sequential per chunk** — correct but not overlapping
+5. **The pipeline is sequential per chunk** — correct but not overlapping
    download and upload in wall-clock terms. ADR-0017; §18 says measure first.
-5. **`content_hash` is validated against independently computed vectors and
+6. **`content_hash` is validated against independently computed vectors and
    against the JDK, not against live Dropbox responses.** Both catch an
    implementation bug; neither catches a misreading both sides share. §36 and
    the v0.3 milestone make this the *first* task of adapter work.
-6. **No Keystore credential storage, no OAuth, no Play assets.** §8.3, §8.4,
+7. **No Keystore credential storage, no OAuth, no Play assets.** §8.3, §8.4,
    §29 — v0.3 and v0.5. No client IDs, real or placeholder, appear anywhere.
-7. **`:providers:dropbox` and `:providers:google-drive` are stubs** carrying
+8. **`:providers:dropbox` and `:providers:google-drive` are stubs** carrying
    TODOs naming the spec sections they must satisfy.
 
 ## What v0.3 (Dropbox adapter) needs from you
@@ -147,7 +175,7 @@ counter (§11).
 Two things need your account rather than code. Registration is not instant, so
 they are worth starting before the code is ready for them.
 
-1. **Dropbox App Console registration** — https://www.dropbox.com/developers/apps
+2. **Dropbox App Console registration** — https://www.dropbox.com/developers/apps
    - The **app key** (client ID). This is a public identifier and may live in
      the repository. I will not invent a placeholder that looks real.
    - Whether the app is **scoped access** with the **full Dropbox** or the **app
@@ -159,12 +187,12 @@ they are worth starting before the code is ready for them.
      a client secret in the APK (§8.1, §30). If the console shows you one, leave
      it where it is.
 
-2. **Redirect URI.** Pick one and register it. I suggest the custom scheme
+3. **Redirect URI.** Pick one and register it. I suggest the custom scheme
    `dev.thiagosindra.cloudlug://oauth/dropbox`, validated against the pending
    PKCE state (§8.4). If you would rather use verified App Links, I need a
    domain you control and the ability to host `assetlinks.json` on it.
 
-3. **Scopes, stated back to me.** Once registered, tell me the scope list the
+4. **Scopes, stated back to me.** Once registered, tell me the scope list the
    console actually shows as enabled, rather than the list you requested. §8.1
    is what the code will assume, and a mismatch surfaces as an `AUTH_REQUIRED`
    loop rather than as a clear error.

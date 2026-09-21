@@ -150,6 +150,35 @@ abstract class ProviderContractTest {
     }
 
     @Test
+    fun `an enumeration whose resume point has vanished starts over rather than yielding nothing`() = runTest {
+        val provider = newProvider()
+        val root = rootFolder(provider)
+        val parent = seedFolder(provider, root, "tree")
+        repeat(3) { seedFile(provider, parent, "file-$it.bin", byteArrayOf(it.toByte())) }
+
+        // §11 resumes from the last object the caller persisted. That object can
+        // be gone by the time the transfer resumes — the user deleted it, or
+        // moved it out of the selection — and an adapter that skips until it
+        // sees an id that will never arrive emits nothing at all. The manifest
+        // then looks complete with no work in it, which is the worst available
+        // outcome: silent, and indistinguishable from success.
+        val vanished = CloudObjectId(provider.type, "an-object-that-is-not-in-this-account")
+        val resumed = provider.enumerate(
+            account(provider),
+            selectionOf(provider, parent),
+            resumeAfter = vanished,
+        ).toList()
+
+        assertTrue(
+            resumed.isNotEmpty(),
+            "a resume point that no longer exists must fall back to a full walk, not an empty one",
+        )
+        // Re-walking is safe: §11 says the manifest deduplicates by source
+        // object id, so a restart is idempotent and only slower.
+        assertEquals(4, resumed.size, "expected the folder and its three files, got ${resumed.map { it.name }}")
+    }
+
+    @Test
     fun `resolveMetadata reports size and revision for a file`() = runTest {
         val provider = newProvider()
         val content = ByteArray(1_000) { it.toByte() }

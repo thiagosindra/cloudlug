@@ -109,7 +109,12 @@ class DropboxCloudProvider(
         selection: CloudSelection,
         resumeAfter: CloudObjectId?,
     ): Flow<CloudObject> = flow {
-        var skipping = resumeAfter != null
+        // A resume point can be gone by the time a transfer resumes — deleted
+        // at the source, or moved out of the selection. Skipping until an id
+        // that will never arrive would emit nothing and produce a manifest that
+        // looks complete with no work in it. One metadata call decides it, and
+        // a full re-walk is safe because §11 deduplicates by source object id.
+        var skipping = resumeAfter != null && exists(account, resumeAfter)
         for (root in selection.roots) {
             listFolder(root.cloudObject.id, recursive = true).collect { entry ->
                 if (skipping) {
@@ -120,6 +125,9 @@ class DropboxCloudProvider(
             }
         }
     }
+
+    private suspend fun exists(account: AccountId, objectId: CloudObjectId): Boolean =
+        runCatching { resolveMetadata(account, objectId) }.isSuccess
 
     /**
      * One `list_folder`, followed as many `list_folder/continue` pages as
