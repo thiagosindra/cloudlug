@@ -49,6 +49,26 @@ class StoredDropboxTokenSource(
     private val mutex = Mutex()
     private var cached: String? = null
     private var expiresAtMillis = 0L
+    private var grantedScopes: Set<String> = emptySet()
+
+    /**
+     * Takes over a grant that has just been completed (§8.1).
+     *
+     * Without this, connecting an account would store the refresh token and
+     * then immediately spend it on a refresh for an access token Dropbox had
+     * already handed over in the same response — a wasted round trip at the
+     * exact moment the user is watching a spinner.
+     *
+     * It also carries the granted scopes, which §7 needs and which arrive only
+     * here: there is no endpoint that reports them afterwards, and the account
+     * row they belong in has not been written yet.
+     */
+    suspend fun adopt(grant: DropboxGrant) = mutex.withLock {
+        grant.refreshToken?.let(store::write)
+        cached = grant.accessToken
+        expiresAtMillis = now() + (grant.expiresIn - skew).coerceAtLeast(Duration.ZERO).inWholeMilliseconds
+        if (grant.grantedScopes.isNotEmpty()) grantedScopes = grant.grantedScopes
+    }
 
     override suspend fun accessToken(): String = mutex.withLock {
         cached?.takeIf { now() < expiresAtMillis }?.let { return@withLock it }
@@ -68,8 +88,14 @@ class StoredDropboxTokenSource(
         grant.accessToken
     }
 
-    /** §7's granted scopes, which live with the account record, not the token. */
-    override suspend fun grantedScopes(): Set<String> = scopes()
+    /**
+     * §7's granted scopes.
+     *
+     * The grant knows them first — during [adopt] the account row does not
+     * exist yet — and the account record knows them on every later launch.
+     */
+    override suspend fun grantedScopes(): Set<String> =
+        grantedScopes.takeIf { it.isNotEmpty() } ?: scopes()
 
     companion object {
         /**

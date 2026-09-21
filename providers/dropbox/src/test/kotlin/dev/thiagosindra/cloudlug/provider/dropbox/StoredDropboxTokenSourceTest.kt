@@ -140,4 +140,51 @@ class StoredDropboxTokenSourceTest {
         assertEquals("rotated", stored.token)
         assertNull(stored.token?.takeIf { it == "an-access-token" })
     }
+
+    @Test
+    fun `adopting a fresh grant costs no refresh`() = runTest {
+        // Dropbox handed over an access token in the same response as the
+        // refresh token. Spending the refresh token to ask for one again would
+        // be a wasted round trip while the user watches a spinner.
+        val source = source()
+
+        source.adopt(
+            DropboxGrant(
+                accessToken = "from-the-grant",
+                refreshToken = "rotated",
+                expiresIn = 4.hours,
+                grantedScopes = setOf("files.content.read"),
+                accountId = "dbid:AAA",
+            ),
+        )
+
+        assertEquals("from-the-grant", source.accessToken())
+        assertEquals("rotated", stored.token)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `an adopted grant answers for the scopes before any account row exists`() = runTest {
+        // §7's granted scopes arrive once, in the token response. At that
+        // moment there is no account record to read them back from, and
+        // Dropbox has no endpoint that will repeat them.
+        val source = source(scopes = emptySet())
+
+        source.adopt(
+            DropboxGrant(
+                accessToken = "at",
+                refreshToken = "rt",
+                expiresIn = 4.hours,
+                grantedScopes = setOf("account_info.read", "files.content.read"),
+                accountId = null,
+            ),
+        )
+
+        assertEquals(setOf("account_info.read", "files.content.read"), source.grantedScopes())
+    }
+
+    @Test
+    fun `granted scopes otherwise come from the account record`() = runTest {
+        assertEquals(setOf("files.metadata.read"), source(scopes = setOf("files.metadata.read")).grantedScopes())
+    }
 }

@@ -41,6 +41,7 @@ include(":tools:dropbox-auth")
 // Android modules from spec §4 and the §24 screens.
 include(
     ":app",
+    ":core:auth",
     ":core:security",
     ":core:ui",
     ":feature:home",

@@ -97,4 +97,40 @@ class DropboxOAuthTest {
             DropboxOAuth.SCOPES,
         )
     }
+
+    @Test
+    fun `a full grant can be both source and destination`() {
+        val roles = DropboxOAuth.rolesFor(DropboxOAuth.SCOPES.toSet())
+
+        assertTrue(roles.canBeSource)
+        assertTrue(roles.canBeDestination)
+    }
+
+    @Test
+    fun `metadata without content cannot be a source`() {
+        // The trap §7 is guarding against: this account can walk the whole
+        // tree and then fail on the first file it tries to read. Refusing it
+        // as a source up front is the kinder failure.
+        val roles = DropboxOAuth.rolesFor(setOf("account_info.read", "files.metadata.read"))
+
+        assertFalse(roles.canBeSource)
+        assertFalse(roles.canBeDestination)
+        assertTrue(roles.canDoNothing)
+    }
+
+    @Test
+    fun `a write-only grant is a destination and not a source`() {
+        val roles = DropboxOAuth.rolesFor(setOf("account_info.read", "files.content.write"))
+
+        assertFalse(roles.canBeSource)
+        assertTrue(roles.canBeDestination)
+    }
+
+    @Test
+    fun `roles read the granted scopes, never the requested ones`() {
+        // A user may decline at the consent screen and Dropbox will still
+        // issue a token for the rest. SCOPES is what was asked for; it must
+        // not be able to influence the answer.
+        assertTrue(DropboxOAuth.rolesFor(emptySet()).canDoNothing)
+    }
 }

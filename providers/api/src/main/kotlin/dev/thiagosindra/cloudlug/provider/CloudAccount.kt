@@ -19,3 +19,16 @@ data class CloudAccount(
     val displayEmail: String?,
     val grantedScopes: Set<String>,
 )
+
+/**
+ * What an account may do, given what its user actually granted (spec §7, §9).
+ *
+ * Separate from [ProviderCapabilities] because the two answer different
+ * questions. Capabilities are a property of the build — whether this APK asked
+ * for a read scope at all — while this is a property of one grant: the same
+ * build can hold one account the user granted everything and another where they
+ * declined at the consent screen.
+ */
+data class AccountRoles(val canBeSource: Boolean, val canBeDestination: Boolean) {
+    val canDoNothing: Boolean get() = !canBeSource && !canBeDestination
+}

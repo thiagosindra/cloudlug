@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
+import dev.thiagosindra.cloudlug.provider.AccountRoles
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.Base64
@@ -74,6 +75,23 @@ object DropboxOAuth {
             state = encoder.encodeToString(ByteArray(16).also(random::nextBytes)),
         )
     }
+
+    /**
+     * §7: what these granted scopes let an account do.
+     *
+     * Reading takes both of Dropbox's read scopes. `files.metadata.read` walks
+     * a tree and `files.content.read` fetches the bytes, so an account holding
+     * only the first can enumerate a whole selection and then fail on the first
+     * file — a worse outcome than saying up front that it cannot be a source.
+     *
+     * Asking what was granted rather than what was requested is the point: a
+     * user may decline a scope at the consent screen, and Dropbox will happily
+     * issue a token for the rest.
+     */
+    fun rolesFor(grantedScopes: Set<String>): AccountRoles = AccountRoles(
+        canBeSource = "files.metadata.read" in grantedScopes && "files.content.read" in grantedScopes,
+        canBeDestination = "files.content.write" in grantedScopes,
+    )
 
     /** `BASE64URL(SHA256(ASCII(verifier)))`, unpadded — RFC 7636 §4.2. */
     fun challengeFor(verifier: String): String =

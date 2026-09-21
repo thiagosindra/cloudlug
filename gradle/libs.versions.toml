@@ -1,8 +1,8 @@
 # Version catalog for CloudLug.
 #
 # v0.2 adds the Android half of the stack from spec §3: AGP, Room, Hilt and
-# Compose. AppAuth, OkHttp and ExifInterface arrive with the first real adapter
-# in v0.3 — see docs/decisions.md.
+# Compose. OkHttp and AppAuth arrive with the first real adapter in v0.3 — see
+# docs/decisions.md. ExifInterface is still unused.
 
 [versions]
 kotlin = "2.2.20"
@@ -10,6 +10,11 @@ ksp = "2.2.20-2.0.4"
 coroutines = "1.10.2"
 serialization = "1.8.1"
 okhttp = "4.12.0"
+# AppAuth 0.11.1 is the current release. CloudLug drives only its browser leg
+# (§8.1's Custom Tab and the redirect back); the PKCE values and the token
+# exchange are CloudLug's own, so the verifier logic the app runs is the
+# logic tools/dropbox-auth has already run by hand.
+appauth = "0.11.1"
 junit = "5.11.4"
 junitPlatform = "1.11.4"
 
@@ -43,6 +48,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
+appauth = { module = "net.openid:appauth", version.ref = "appauth" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junitPlatform" }
 
