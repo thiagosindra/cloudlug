@@ -4,11 +4,11 @@
     <cloud-backup>
         <exclude domain="file" path="cloudlug-cache/" />
         <exclude domain="file" path="credentials/" />
-        <exclude domain="sharedpref" path="credentials.xml" />
+        <exclude domain="sharedpref" path="cloudlug-credentials.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="cloudlug-cache/" />
         <exclude domain="file" path="credentials/" />
-        <exclude domain="sharedpref" path="credentials.xml" />
+        <exclude domain="sharedpref" path="cloudlug-credentials.xml" />
     </device-transfer>
 </data-extraction-rules>

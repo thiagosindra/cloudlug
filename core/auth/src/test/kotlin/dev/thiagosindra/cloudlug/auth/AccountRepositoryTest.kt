@@ -124,10 +124,27 @@ class AccountRepositoryTest {
         // is a real, usable account that cannot be a destination.
         repository.completeConnection(ProviderType.DROPBOX, result = null)
 
-        val roles = repository.rolesFor(repository.observe().first().single())
+        val roles = assertNotNull(repository.rolesFor(repository.observe().first().single()))
 
         assertTrue(roles.canBeSource)
         assertTrue(!roles.canBeDestination)
+    }
+
+    @Test
+    fun `a provider with no connector has no roles and offers no connect`() = runTest {
+        // Google Drive until v0.4: §24.5 shows it as unsupported rather than
+        // being handed a connector that throws when tapped.
+        assertTrue(!repository.canConnect(ProviderType.GOOGLE_DRIVE))
+        assertTrue(repository.canConnect(ProviderType.DROPBOX))
+
+        val drive = CloudAccount(
+            id = AccountId("drive:1"),
+            provider = ProviderType.GOOGLE_DRIVE,
+            displayName = null,
+            displayEmail = null,
+            grantedScopes = setOf("drive.file"),
+        )
+        assertNull(repository.rolesFor(drive))
     }
 
     @Test

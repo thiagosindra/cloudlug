@@ -43,8 +43,14 @@ class NewTransferJourneyTest {
 
         // 1 and 2: the two accounts. §2.2 forbids transferring to the same
         // provider, so the destination list must still offer the other one.
+        //
+        // The source is the demo provider rather than Dropbox as of v0.3:
+        // ProviderType.DROPBOX is the real adapter now and would want a
+        // connected account and a network. What this test is for is the engine
+        // and the §24 screens end to end, which the fake exercises completely
+        // (§31.3) and the network would only make flaky.
         awaitText("1. Choose the source account")
-        node("Dropbox").performClick()
+        node("Demo provider").performClick()
 
         awaitText("2. Choose the destination account")
         node("Google Drive").performClick()
@@ -73,7 +79,7 @@ class NewTransferJourneyTest {
         // transfer reaches home rather than step 5 — so the wizard's own
         // "Transfer started." is never drawn. §24.3 is where a started
         // transfer is observable.
-        awaitText("Dropbox -> Google Drive", timeoutMillis = 30_000)
+        awaitText("Demo provider -> Google Drive", timeoutMillis = 30_000)
 
         // And it does not merely start. The engine runs to completion inside
         // the app, with every item verified at the destination per §21, which

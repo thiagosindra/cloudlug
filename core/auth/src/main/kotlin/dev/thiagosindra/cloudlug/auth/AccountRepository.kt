@@ -35,8 +35,18 @@ class AccountRepository(
     suspend fun grantedScopes(provider: ProviderType): Set<String> =
         connected(provider)?.grantedScopes.orEmpty()
 
-    fun rolesFor(account: CloudAccount): AccountRoles =
-        connector(account.provider).rolesFor(account.grantedScopes)
+    /**
+     * Whether this build can connect [provider] at all.
+     *
+     * A provider with no connector is one this version does not support yet —
+     * Google Drive until v0.4. §24.5's screen shows that as a fact rather than
+     * offering a Connect button that cannot work.
+     */
+    fun canConnect(provider: ProviderType): Boolean = provider in connectors
+
+    /** Null for a provider with no connector; only that provider knows §7's answer. */
+    fun rolesFor(account: CloudAccount): AccountRoles? =
+        connectors[account.provider]?.rolesFor(account.grantedScopes)
 
     fun authorizationIntent(provider: ProviderType): Intent = connector(provider).authorizationIntent()
 

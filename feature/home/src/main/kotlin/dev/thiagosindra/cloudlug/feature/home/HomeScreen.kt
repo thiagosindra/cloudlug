@@ -14,6 +14,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,12 +39,22 @@ import dev.thiagosindra.cloudlug.ui.summaryLine
 fun HomeScreen(
     onNewTransfer: () -> Unit,
     onOpenTransfer: (TransferId) -> Unit,
+    onAccounts: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("CloudLug") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("CloudLug") },
+                actions = {
+                    // §24.5's way in. A text button rather than an icon: the
+                    // word is unambiguous and this app has no icon set yet.
+                    TextButton(onClick = onAccounts) { Text("Accounts") }
+                },
+            )
+        },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onNewTransfer,
@@ -61,7 +72,8 @@ fun HomeScreen(
             if (state.active.isEmpty() && state.history.isEmpty()) {
                 item {
                     Text(
-                        "No transfers yet. Start one to move files between two cloud accounts.",
+                        "No transfers yet. Connect your cloud accounts, then start one to " +
+                            "move files between them.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

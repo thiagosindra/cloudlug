@@ -3,9 +3,14 @@
   Spec §15.2 and §28: the chunk cache and any credential store are excluded from
   backup. Chunks are large, transient and meaningless off-device; credentials are
   Keystore-wrapped and must never leave it.
+
+  The sharedpref name has to match KeystoreSecretStore's DEFAULT_PREFERENCES
+  exactly. A near miss excludes nothing, and the ciphertext would ride a cloud
+  backup onto another device where the Keystore key that opens it does not
+  exist — unreadable, but somewhere it was never meant to be.
 -->
 <full-backup-content>
     <exclude domain="file" path="cloudlug-cache/" />
     <exclude domain="file" path="credentials/" />
-    <exclude domain="sharedpref" path="credentials.xml" />
+    <exclude domain="sharedpref" path="cloudlug-credentials.xml" />
 </full-backup-content>
