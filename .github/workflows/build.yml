@@ -28,6 +28,15 @@ jobs:
       # :app:testDebugUnitTest and need an SDK; listing the JVM modules keeps
       # this job proving what it claims — that the engine, the Room layer
       # included, builds and passes with no Android SDK anywhere.
+      #
+      # A module added and not listed here is silently exempt from that claim,
+      # which is how :core:network and :providers:dropbox came to be proven
+      # only by the job that does have an SDK. The whole Dropbox adapter is
+      # pure Kotlin and belongs here.
+      #
+      # :providers:dropbox's live tests skip without DROPBOX_REFRESH_TOKEN,
+      # which this job does not set and must not: CI stays hermetic and a fork
+      # with no secret goes green.
       - name: Test the JVM modules
         run: |
           ./gradlew --stacktrace \
@@ -37,7 +46,10 @@ jobs:
             :core:storage:test \
             :core:transfer:test \
             :providers:api:test \
-            :providers:fake:test
+            :providers:fake:test \
+            :core:network:test \
+            :providers:dropbox:test \
+            :tools:dropbox-hash-check:test
 
       - name: Upload test reports
         if: failure()
