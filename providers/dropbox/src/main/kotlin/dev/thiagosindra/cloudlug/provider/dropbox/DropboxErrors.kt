@@ -78,6 +78,18 @@ internal object DropboxErrors {
     }
 
     /**
+     * The offset Dropbox says an upload session is really at (§22.5).
+     *
+     * Only present on `incorrect_offset`, and it is the whole point of that
+     * error: it is how a resumed upload learns where to continue from after
+     * the process that was uploading died.
+     */
+    fun correctOffsetOf(body: String): Long? = runCatching {
+        json.parseToJsonElement(body).jsonObject["error"]?.jsonObject?.get("correct_offset")
+            ?.let { (it as? JsonPrimitive)?.content?.toLongOrNull() }
+    }.getOrNull()
+
+    /**
      * Every tag in an error node, whichever of the two shapes it arrived in.
      *
      * Dropbox speaks two error dialects. Its API routes send a tagged union,
