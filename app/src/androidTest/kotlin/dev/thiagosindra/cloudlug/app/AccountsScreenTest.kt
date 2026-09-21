@@ -1,9 +1,7 @@
 package dev.thiagosindra.cloudlug.app
 
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Rule
@@ -28,18 +26,18 @@ class AccountsScreenTest {
 
     @Test
     fun the_accounts_screen_is_reachable_and_tells_the_truth_about_each_provider() {
-        node("Accounts").performClick()
+        compose.node("Accounts").performClick()
 
         // Dropbox is the real adapter as of v0.3 and nothing is connected on a
         // fresh install, so it must offer a way in rather than pretending.
-        awaitText("Dropbox")
-        awaitText("Not connected")
-        awaitText("Connect")
+        compose.awaitText("Dropbox")
+        compose.awaitText("Not connected")
+        compose.awaitText("Connect")
 
         // Google Drive is v0.4. Saying so is better than a Connect button that
         // cannot work.
-        awaitText("Google Drive")
-        awaitText("Not supported in this version yet")
+        compose.awaitText("Google Drive")
+        compose.awaitText("Not supported in this version yet")
 
         // The demo provider has no account, no sign-in and nothing to revoke,
         // so it has no row here even though the wizard offers it in debug.
@@ -49,28 +47,16 @@ class AccountsScreenTest {
         )
 
         // §8.1's promise, stated where the user decides whether to trust it.
-        awaitText("never sees your password", substring = true)
+        compose.awaitText("never sees your password")
     }
 
     @Test
     fun backing_out_of_accounts_returns_to_the_transfer_list() {
-        node("Accounts").performClick()
-        awaitText("Dropbox")
+        compose.node("Accounts").performClick()
+        compose.awaitText("Dropbox")
 
-        node("Back").performClick()
+        compose.node("Back").performClick()
 
-        awaitText("New Transfer")
-    }
-
-    private fun node(text: String): SemanticsNodeInteraction {
-        awaitText(text)
-        return compose.onNodeWithText(text, useUnmergedTree = true)
-    }
-
-    private fun awaitText(text: String, substring: Boolean = false, timeoutMillis: Long = 15_000) {
-        compose.waitUntil(timeoutMillis) {
-            compose.onAllNodesWithText(text, substring = substring, useUnmergedTree = true)
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        compose.awaitText("New Transfer")
     }
 }
