@@ -8,11 +8,14 @@ import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
+import dev.thiagosindra.cloudlug.provider.CloudErrorKind
+import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.CloudObject
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.provider.CloudSelection
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
+import dev.thiagosindra.cloudlug.ui.providerLabel
 import dev.thiagosindra.cloudlug.transfer.manifest.ManifestSummary
 import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
 import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
@@ -208,6 +211,12 @@ class NewTransferViewModel @Inject constructor(
         return provider.listChildren(account.id, provider.rootOf(account.id)).toList()
     }
 
-    private fun browseFailure(type: ProviderType, failure: Throwable): String =
-        failure.message ?: "Could not list the contents of $type"
+    private fun browseFailure(type: ProviderType, failure: Throwable): String = when {
+        // The one failure with an obvious next step. Without this the user sees
+        // the adapter's own wording, which explains the state but not the cure.
+        failure is CloudException && failure.kind == CloudErrorKind.AUTH_REQUIRED ->
+            "Connect a ${providerLabel(type)} account first, on the Accounts screen."
+
+        else -> failure.message ?: "Could not list the contents of ${providerLabel(type)}"
+    }
 }

@@ -24,6 +24,7 @@ include(
     ":core:model",
     ":core:database",
     ":core:hashing",
+    ":core:network",
     ":core:storage",
     ":core:transfer",
     ":providers:api",
@@ -32,10 +33,18 @@ include(
     ":providers:google-drive",
 )
 
+// Not shipped. A §36 validation harness, run by hand against a real account:
+// it needs a token and the network, so it is never part of `build` or CI.
+include(":tools:dropbox-hash-check")
+include(":tools:dropbox-auth")
+
 // Android modules from spec §4 and the §24 screens.
 include(
     ":app",
+    ":core:auth",
+    ":core:security",
     ":core:ui",
+    ":feature:accounts",
     ":feature:home",
     ":feature:new-transfer",
     ":feature:transfer-details",

@@ -4,8 +4,10 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dev.thiagosindra.cloudlug.BuildConfig
 import dev.thiagosindra.cloudlug.model.HashAlgorithm
 import dev.thiagosindra.cloudlug.model.ProviderType
+import dev.thiagosindra.cloudlug.provider.dropbox.DropboxCloudProvider
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudProvider
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudStorage
 import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
@@ -15,19 +17,24 @@ import javax.inject.Singleton
 import kotlin.random.Random
 
 /**
- * Two [FakeCloudProvider]s standing in for Dropbox and Google Drive (§33 v0.2).
+ * The two [FakeCloudProvider]s the app still runs on where no real adapter
+ * exists yet (§31.3).
  *
- * The point of running the shell against the fake first is that it exercises the
- * engine's entire public surface — enumeration, manifest review, chunked
- * transfer, verification, pause, resume, cancel — with no OAuth, no network and
- * no account, so anything the UI reveals about those interfaces is found before
- * a real adapter is written (spec §31.3). v0.3 replaces the source binding with
- * `:providers:dropbox` and nothing above this module changes.
+ * v0.3 did what the v0.2 comment here promised: `ProviderType.DROPBOX` is now
+ * the real adapter in [AuthModule], and nothing above these modules changed —
+ * which was the claim being tested. What is left is the demo provider, which
+ * needs no OAuth, no network and no account, and Google Drive, which is v0.4.
  *
- * Each is configured to behave like the provider it stands in for, so the
- * capability-driven paths of §19.3 and §20.3 are genuinely exercised: the
- * Dropbox stand-in uses the block hash, folds case and forbids duplicate
- * siblings; the Drive stand-in uses SHA-256, is case-sensitive and allows them.
+ * The demo provider is offered in debug builds only. It exercises the engine's
+ * entire public surface — enumeration, manifest review, chunked transfer,
+ * verification, pause, resume, cancel — which is what the emulator journey test
+ * drives, and it has no business in a release build.
+ *
+ * Each is configured to behave like a real provider rather than like an ideal
+ * one, so the capability-driven paths of §19.3 and §20.3 are genuinely
+ * exercised: the demo source uses a block hash, folds case and forbids
+ * duplicate siblings; the Drive stand-in uses SHA-256, is case-sensitive and
+ * allows them.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -35,8 +42,8 @@ object DemoProvidersModule {
 
     @Provides
     @Singleton
-    @Named("source")
-    fun sourceProvider(): FakeCloudProvider {
+    @Named("demo")
+    fun demoProvider(): FakeCloudProvider {
         val capabilities = FakeCloudProvider.defaultCapabilities(
             nativeHashAlgorithm = HashAlgorithm.DROPBOX_CONTENT_HASH,
             caseSensitiveNames = false,
@@ -44,10 +51,10 @@ object DemoProvidersModule {
             uploadChunkAlignment = 4L * 1024 * 1024,
             disallowsTrailingSpaceOrDot = true,
         )
-        val storage = FakeCloudStorage(ProviderType.DROPBOX, capabilities.nativeHashAlgorithm)
+        val storage = FakeCloudStorage(ProviderType.FAKE, capabilities.nativeHashAlgorithm)
         seedDemoTree(storage)
         return FakeCloudProvider(
-            type = ProviderType.DROPBOX,
+            type = ProviderType.FAKE,
             capabilities = capabilities,
             storage = storage,
         )
@@ -77,20 +84,32 @@ object DemoProvidersModule {
     @Provides
     @Singleton
     fun providerRegistry(
-        @Named("source") source: FakeCloudProvider,
+        dropbox: DropboxCloudProvider,
+        @Named("demo") demo: FakeCloudProvider,
         @Named("destination") destination: FakeCloudProvider,
     ): ProviderRegistry = ProviderRegistry { type ->
         when (type) {
-            ProviderType.DROPBOX -> source
+            ProviderType.DROPBOX -> dropbox
             ProviderType.GOOGLE_DRIVE -> destination
-            ProviderType.FAKE -> source
+            ProviderType.FAKE -> demo
         }
     }
 
+    /**
+     * §24.2's first two steps.
+     *
+     * The demo provider is listed in debug builds only. Leaving it in a release
+     * build would offer users a source full of invented files.
+     */
     @Provides
     @Singleton
-    fun availableProviders() =
-        AvailableProviders(listOf(ProviderType.DROPBOX, ProviderType.GOOGLE_DRIVE))
+    fun availableProviders() = AvailableProviders(
+        buildList {
+            add(ProviderType.DROPBOX)
+            add(ProviderType.GOOGLE_DRIVE)
+            if (BuildConfig.DEBUG) add(ProviderType.FAKE)
+        },
+    )
 
     /**
      * A tree with the awkward cases in it, so the review step has something to

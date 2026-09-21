@@ -137,7 +137,13 @@ class FakeCloudProvider(
             // happens until collection starts (spec §5).
             record(FailureInjection.Operation.ENUMERATE)
             var emitted = 0
-            var skipping = resumeAfter != null
+            // A resume point that is no longer in the account can never be
+            // reached, and skipping until it arrives would emit nothing at all
+            // — a manifest that looks complete with no work in it. §11 permits
+            // a restart because the manifest deduplicates by source object id,
+            // so falling back to a full walk is both safe and the only correct
+            // option here.
+            var skipping = resumeAfter != null && storage.find(resumeAfter.opaqueId) != null
             val stack = ArrayDeque(selection.objects.reversed())
             while (stack.isNotEmpty()) {
                 val current = stack.removeLast()

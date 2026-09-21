@@ -286,9 +286,18 @@ class TransferEngine(
 
         val transfer = repository.findTransfer(transferId) ?: return
         val destination = providers.provider(transfer.destinationProvider)
+
+        // Record the cancellation *first* (ADR-0027). Aborting the session kills
+        // it under a worker that is still mid-file, and that worker's next call
+        // fails; `run()` decides whether such a failure is expected by re-reading
+        // this row. Abort first and there is a window where the row still says
+        // DOWNLOADING, so the failure looks like a genuine fault and ends the
+        // whole transfer — the §22.2 bug of PR #8, reached by a different
+        // interleaving. Marking first closes it: whatever the worker hits
+        // afterwards, the item is already terminal.
+        repository.transitionItem(itemId, TransferItemStatus.CANCELLED, ItemStatusReason.CANCELLED_BY_USER)
         abortUploadSession(transfer, item, destination)
         discardChunks(transferId, itemId)
-        repository.transitionItem(itemId, TransferItemStatus.CANCELLED, ItemStatusReason.CANCELLED_BY_USER)
     }
 
     /**

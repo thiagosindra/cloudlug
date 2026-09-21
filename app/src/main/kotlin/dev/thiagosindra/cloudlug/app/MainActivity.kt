@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import dagger.hilt.android.AndroidEntryPoint
+import dev.thiagosindra.cloudlug.feature.accounts.AccountsScreen
 import dev.thiagosindra.cloudlug.feature.home.HomeScreen
 import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
 import dev.thiagosindra.cloudlug.feature.transferdetails.TransferDetailScreen
@@ -66,12 +67,13 @@ class MainActivity : ComponentActivity() {
 
 private object Routes {
     const val HOME = "home"
+    const val ACCOUNTS = "accounts"
     const val NEW_TRANSFER = "new-transfer"
     const val DETAIL = "transfer/{transferId}"
     fun detail(id: String) = "transfer/$id"
 }
 
-/** The §24 screens: home, the wizard, and one transfer's detail. */
+/** The §24 screens: home, accounts, the wizard, and one transfer's detail. */
 @Composable
 fun CloudLugNavHost() {
     val navController = rememberNavController()
@@ -81,7 +83,15 @@ fun CloudLugNavHost() {
             HomeScreen(
                 onNewTransfer = { navController.navigate(Routes.NEW_TRANSFER) },
                 onOpenTransfer = { navController.navigate(Routes.detail(it.value)) },
+                onAccounts = { navController.navigate(Routes.ACCOUNTS) },
             )
+        }
+
+        // §24.5. Reached from home rather than given a bottom-bar tab of its
+        // own: it is a place people visit twice, not a place they live
+        // (ADR-0028).
+        composable(Routes.ACCOUNTS) {
+            AccountsScreen(onBack = { navController.popBackStack() })
         }
 
         composable(Routes.NEW_TRANSFER) {

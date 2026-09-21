@@ -12,12 +12,21 @@ android {
 
     defaultConfig {
         applicationId = "dev.thiagosindra.cloudlug"
-        versionCode = 2
-        versionName = "0.2.1"
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // AppAuth's redirect receiver claims this scheme. It is the application
+        // id, which is what stops another app on the device registering the
+        // same one and intercepting §8.1's authorization code.
+        manifestPlaceholders["appAuthRedirectScheme"] = "dev.thiagosindra.cloudlug"
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        // The demo provider is offered in debug builds only (§31.3).
+        buildConfig = true
+    }
 
     buildTypes {
         release {
@@ -36,10 +45,16 @@ dependencies {
     implementation(project(":core:storage"))
     implementation(project(":core:transfer"))
     implementation(project(":providers:api"))
-    // The fake provider is what v0.2 runs against: it exercises the engine's
-    // whole surface with no OAuth and no network (spec §31.3, §33 v0.2).
-    // v0.3 replaces this with :providers:dropbox.
+    implementation(project(":providers:dropbox"))
+    implementation(project(":core:network"))
+    implementation(project(":core:security"))
+    implementation(project(":core:auth"))
+    // Still here in v0.3, now as its own provider type rather than standing in
+    // for Dropbox: it exercises the engine's whole surface with no OAuth and no
+    // network (§31.3), which is what the emulator journey test needs. Debug
+    // builds only.
     implementation(project(":providers:fake"))
+    implementation(project(":feature:accounts"))
     implementation(project(":feature:home"))
     implementation(project(":feature:new-transfer"))
     implementation(project(":feature:transfer-details"))
@@ -52,6 +67,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
     implementation(libs.sqlite.framework)
+    implementation(libs.okhttp)
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
