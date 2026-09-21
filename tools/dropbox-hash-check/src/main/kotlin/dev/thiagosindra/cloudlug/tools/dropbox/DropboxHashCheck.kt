@@ -78,13 +78,27 @@ private class Dropbox(private val token: String) {
         return response.body()
     }
 
-    fun delete(path: String) {
+    /**
+     * Deletes [path], returning false when there was nothing there.
+     *
+     * A run that fails before its first upload has no folder to remove, and
+     * saying "remove it by hand" about a folder that was never created sends
+     * the reader looking for something that does not exist.
+     */
+    fun deleteIfPresent(path: String): Boolean {
         val request = HttpRequest.newBuilder(URI.create("$API_HOST/2/files/delete_v2"))
             .header("Authorization", "Bearer $token")
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString("""{"path":${quote(path)}}"""))
             .build()
-        send(request, "delete $path")
+        val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() in 200..299) return true
+        // Dropbox reports a missing path as 409 path_lookup/not_found; 404 shows
+        // up on some routes. Neither is a cleanup failure.
+        if (response.statusCode() == 404 || (response.statusCode() == 409 && "not_found" in response.body())) {
+            return false
+        }
+        error("delete $path failed: HTTP ${response.statusCode()} ${response.body().take(300)}")
     }
 
     private fun send(request: HttpRequest, what: String): String {
@@ -178,9 +192,10 @@ fun main() {
             ) && allMatched
         }
     } finally {
-        // Leave nothing behind, even when a case fails.
-        runCatching { dropbox.delete(folder) }
-            .onSuccess { println("Cleaned up $folder") }
+        // Leave nothing behind, even when a case fails — and say nothing when
+        // there was nothing to leave.
+        runCatching { dropbox.deleteIfPresent(folder) }
+            .onSuccess { removed -> if (removed) println("Cleaned up $folder") }
             .onFailure { System.err.println("Could not delete $folder — remove it by hand: ${it.message}") }
     }
 

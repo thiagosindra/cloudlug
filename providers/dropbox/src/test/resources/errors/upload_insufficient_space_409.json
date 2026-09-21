@@ -1,0 +1,12 @@
+{
+  "error_summary": "path/insufficient_space/...",
+  "error": {
+    ".tag": "path",
+    "path": {
+      "reason": {
+        ".tag": "insufficient_space"
+      },
+      "upload_session_id": "REDACTED_UPLOAD_SESSION_ID"
+    }
+  }
+}

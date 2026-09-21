@@ -1,0 +1,51 @@
+# Manual only. Spec §36 asks for `content_hash` to be checked against a real
+# account at the *start* of each adapter milestone; this makes a re-check
+# something anyone can trigger from the Actions tab instead of something that
+# needs a laptop with a token on it.
+#
+# Never runs on push or pull_request: it needs a live token and the network, and
+# CI stays hermetic.
+name: Validate Dropbox content_hash
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_path:
+        description: "An existing file in the Dropbox account, e.g. /Car/Mazda.txt"
+        required: true
+        type: string
+
+jobs:
+  validate:
+    name: content_hash against a real account (§36)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Fails in seconds with a reason rather than in the tool with a usage
+      # message that reads like the caller got the command wrong.
+      - name: Require the token
+        env:
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+        run: |
+          if [ -z "$DROPBOX_TOKEN" ]; then
+            echo "::error::The DROPBOX_TOKEN repository secret is not set. Add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      # The token reaches the JVM through the environment only. Actions masks
+      # secret values in logs, and the tool prints no headers (§26).
+      - name: Validate
+        env:
+          DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+          DROPBOX_TEST_PATH: ${{ inputs.test_path }}
+        run: ./gradlew :tools:dropbox-hash-check:validateDropboxHashes --console=plain
