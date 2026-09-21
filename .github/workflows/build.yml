@@ -191,7 +191,10 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 300
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: ./gradlew :app:connectedDebugAndroidTest --stacktrace
+          # :core:security too, because §8.3's guarantees are about Android
+          # Keystore and Keystore exists only on a device. A JVM test there
+          # could only exercise a fake, which would verify nothing.
+          script: ./gradlew :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest --stacktrace
 
       - name: Upload instrumentation reports
         if: failure()
@@ -201,3 +204,5 @@ jobs:
           path: |
             app/build/reports/androidTests/**
             app/build/outputs/androidTest-results/**
+            core/security/build/reports/androidTests/**
+            core/security/build/outputs/androidTest-results/**
