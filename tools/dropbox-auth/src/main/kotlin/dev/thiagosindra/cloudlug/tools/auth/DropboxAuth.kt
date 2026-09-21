@@ -1,13 +1,17 @@
 package dev.thiagosindra.cloudlug.tools.auth
 
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxOAuth
+import dev.thiagosindra.cloudlug.provider.dropbox.PkceChallenge
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.io.IOException
+import java.net.ConnectException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.channels.UnresolvedAddressException
 import kotlin.system.exitProcess
 
 /**
@@ -35,6 +39,59 @@ import kotlin.system.exitProcess
  * it lives for four hours and the live gate mints its own.
  */
 private val json = Json { ignoreUnknownKeys = true }
+
+/**
+ * Sends the exchange, and offers to send it again if it never left the machine.
+ *
+ * An authorization code is single-use, but it is only *used* once Dropbox
+ * receives it. A DNS failure or a refused connection means the request was
+ * never sent, so the code in hand is still good — and throwing it away over a
+ * dropped VPN would make the user re-authorize for no reason. The first version
+ * of this tool did exactly that, with a stack trace.
+ *
+ * A failure *after* the request reached Dropbox is different: the code may have
+ * been consumed, and retrying it would be the wrong thing. That is why only
+ * connect-time failures are offered a retry, and why the message says which
+ * kind happened.
+ */
+private fun exchange(code: String, challenge: PkceChallenge): HttpResponse<String> {
+    val request = HttpRequest.newBuilder(URI.create(DropboxOAuth.TOKEN_ENDPOINT))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .POST(HttpRequest.BodyPublishers.ofString(DropboxOAuth.formBody(DropboxOAuth.codeExchangeForm(code, challenge))))
+        .build()
+    val client = HttpClient.newHttpClient()
+    val host = URI.create(DropboxOAuth.TOKEN_ENDPOINT).host
+
+    while (true) {
+        try {
+            return client.send(request, HttpResponse.BodyHandlers.ofString())
+        } catch (offline: IOException) {
+            val cause = generateSequence(offline as Throwable) { it.cause }.last()
+            val reason = when (cause) {
+                is UnresolvedAddressException -> "$host could not be resolved — DNS, a VPN, or no network"
+                is ConnectException -> "$host refused the connection"
+                else -> "${cause.javaClass.simpleName}${cause.message?.let { ": $it" } ?: ""}"
+            }
+            System.err.println(
+                """
+                |
+                |Could not reach Dropbox: $reason.
+                |
+                |The request never left this machine, so the code you pasted has
+                |not been used and is still valid. Fix the connection and press
+                |enter to try the same code again, or type q to give up.
+                |
+                """.trimMargin(),
+            )
+            System.err.print("Retry? [enter/q] ")
+            System.err.flush()
+            // EOF counts as giving up. Without this a non-interactive stdin
+            // returns null for ever and the loop never ends.
+            val answer = readlnOrNull() ?: exitProcess(1)
+            if (answer.trim().lowercase() == "q") exitProcess(1)
+        }
+    }
+}
 
 fun main() {
     val challenge = DropboxOAuth.newChallenge()
@@ -64,13 +121,7 @@ fun main() {
         exitProcess(2)
     }
 
-    val form = DropboxOAuth.formBody(DropboxOAuth.codeExchangeForm(code, challenge))
-    val request = HttpRequest.newBuilder(URI.create(DropboxOAuth.TOKEN_ENDPOINT))
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .POST(HttpRequest.BodyPublishers.ofString(form))
-        .build()
-
-    val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+    val response = exchange(code, challenge)
     if (response.statusCode() !in 200..299) {
         // The body of a failed grant carries an error tag, not a token. It is
         // still not echoed wholesale: an expired code is the common case and
