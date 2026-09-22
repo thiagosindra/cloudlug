@@ -211,7 +211,11 @@ private fun ConnectedAccountBlock(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedButton(onClick = onDisconnect, enabled = enabled) { Text("Disconnect") }
+            // The ellipsis is the old convention for "this opens something
+            // else rather than acting now", which is true — §8.3's disconnect
+            // is confirmed first. It also keeps this button distinct from the
+            // dialog's, which matters to anything matching on text.
+            OutlinedButton(onClick = onDisconnect, enabled = enabled) { Text("Disconnect…") }
         }
     }
 }

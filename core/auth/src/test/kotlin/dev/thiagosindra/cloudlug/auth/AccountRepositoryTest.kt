@@ -1,6 +1,7 @@
 package dev.thiagosindra.cloudlug.auth
 
 import android.content.Intent
+import dev.thiagosindra.cloudlug.database.entity.AccountEntity
 import dev.thiagosindra.cloudlug.database.inmemory.InMemoryCloudLugDatabase
 import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.ProviderType
@@ -182,5 +183,27 @@ class AccountRepositoryTest {
     fun `granted scopes for a provider nobody connected are empty, not an error`() = runTest {
         assertTrue(repository.grantedScopes(ProviderType.DROPBOX).isEmpty())
         assertNull(repository.connected(ProviderType.DROPBOX))
+    }
+
+    @Test
+    fun `disconnecting an account whose provider has no connector just forgets it`() = runTest {
+        // A demo row, or a provider a later build stopped supporting. There is
+        // no grant to revoke. Looking the connector up with error() threw
+        // IllegalStateException, which is not a CloudException, so it fell past
+        // §24.5's error handling and crashed the app on a button press.
+        database.accounts.upsert(
+            AccountEntity(
+                id = AccountId("demo-destination"),
+                provider = ProviderType.GOOGLE_DRIVE,
+                providerAccountId = "demo-destination",
+                grantedScopes = emptySet(),
+                createdAt = Instant.parse("2026-09-22T10:00:00Z"),
+            ),
+        )
+
+        repository.disconnect(AccountId("demo-destination"))
+
+        assertNull(database.accounts.findById(AccountId("demo-destination")))
+        assertTrue(connector.calls.isEmpty(), "the Dropbox connector was asked to revoke somebody else's account")
     }
 }

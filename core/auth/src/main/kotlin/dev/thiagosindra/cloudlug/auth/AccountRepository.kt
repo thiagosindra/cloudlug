@@ -99,7 +99,15 @@ class AccountRepository(
      */
     suspend fun disconnect(account: AccountId) {
         val row = database.accounts.findById(account) ?: return
-        connector(row.provider).disconnect(account)
+        // No connector means nothing in this build signed in, so there is no
+        // grant to revoke — a demo row, or a provider a later build stopped
+        // supporting. Forgetting it locally is the whole of the work.
+        //
+        // Not `connector(...)`: that throws IllegalStateException, which is
+        // not a CloudException and so falls straight past §24.5's error
+        // handling and out of the ViewModel's coroutine. Pressing Disconnect
+        // on such a row crashed the app.
+        connectors[row.provider]?.disconnect(account)
         database.accounts.delete(account)
     }
 
