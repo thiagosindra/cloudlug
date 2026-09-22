@@ -799,3 +799,55 @@ status code.
 **What changes it.** An adapter whose API returns containment in a recursive
 listing — parent ids in the entries, not paths — can use it, and should. The
 requirement is the contract in §5, not the number of requests.
+
+---
+
+## ADR-0030 — A caller that knows which struct it asked for says so
+
+**Status.** Accepted in v0.4.2, pending spec ratification.
+
+**Context.** The first real Dropbox → Dropbox transfer moved its bytes
+successfully and then failed every single file with `error permanent`, at the
+instant the upload finished. A retry found all of them already at the
+destination, "duplicate verified by hash".
+
+`.tag` appears on a Dropbox value only where that value is a **union member**.
+`list_folder` and `get_metadata` answer with `Metadata`, a union, so each entry
+says `".tag": "file"`. `upload_session/finish` answers with a `FileMetadata`
+**struct** — the route returns one type, so there is no member to name and no
+tag in the body. `DropboxObjects.toCloudObject` read the tag as though it were
+always present and returned null for a perfectly good response;
+`finishUpload` turned that null into a PERMANENT failure. Dropbox had already
+committed the file, which is why the bytes were always there afterwards.
+
+This is the second time this adapter has been wrong about a response shape that
+differs per route — the flattened error union was the first — and both times
+the wrong shape was the one the tests never sent.
+
+**Decision.** `toCloudObject` takes an optional `assume` type, consulted **only**
+when there is no tag to read and never allowed to override one. `finishUpload`
+passes `FILE`, which it knows by construction: that call is what made the object
+a file.
+
+Inferring the type instead — a value with `size` and `rev` is a file — was
+rejected. It guesses from fields that a future response could carry or drop, to
+recover a fact the caller already knows for certain. A parser that guesses is
+wrong silently; a caller that declares is wrong loudly, at the one line that
+made the claim.
+
+**Why the tests missed it.** §31.2 has exactly the right check —
+`finishUpload reports the provider hash when the provider has one` — and it
+would have failed on the first run. It is live-only for Dropbox, so CI has
+never run it. `docs/testing.md` rule 1 exists for this: live tests prove the
+wire, recorded tests prove the handoff, and only one of the two runs on every
+PR. The Dropbox adapter now ships recorded coverage of both the enumeration and
+the upload leg.
+
+**The diagnosis was in the database the whole time.** §24.3 rendered the item's
+status *reason* — "error permanent", a category — and never its
+`lastErrorMessage`, which already said `upload_session/finish returned no file
+metadata`. Two milestones running were diagnosed from screenshots that could
+have carried the answer. The failed-item row now shows the message.
+
+**What changes it.** If Dropbox ever tags its struct responses, `assume` stops
+being consulted and nothing else moves.

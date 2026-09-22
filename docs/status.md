@@ -1,4 +1,4 @@
-# Status — v0.4.1 (the first real transfer, and why it did not work)
+# Status — v0.4.2 (the first real transfer, and the two bugs in it)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account** rather than against a fake that agrees with
@@ -12,6 +12,15 @@ whole subtree in one recursive call, and that response contains neither the
 selected folder nor any containment between its entries — so `ManifestBuilder`,
 which rebuilds every relative path from `parentId`, rejected the first object it
 was handed. The adapter now walks the tree a folder at a time (ADR-0029).
+
+**Then the bytes moved, and every file still failed.** With enumeration fixed,
+a real file downloaded and uploaded correctly — and was marked `error
+permanent` the instant Dropbox committed it, with a retry finding it already
+there, "duplicate verified by hash". `upload_session/finish` answers with a
+`FileMetadata` struct, which carries no `.tag`, and the adapter read the tag as
+though every route returned a union member. It turned its own success response
+into null (ADR-0030). §31.2 has the check that would have caught this on the
+first run; it is live-only, so CI has never run it.
 
 This is the third defect in a row to live in a **handoff** rather than in a
 component, and the most expensive: the Dropbox contract suite is live-only,
