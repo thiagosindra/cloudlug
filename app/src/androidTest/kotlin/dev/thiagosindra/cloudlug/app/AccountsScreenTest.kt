@@ -38,14 +38,19 @@ class AccountsScreenTest {
         compose.awaitText("Not connected")
         compose.awaitText("Connect")
 
-        // Google Drive is v0.4. Saying so, with no button, is better than a
-        // greyed Connect that invites a press it can never honour — and it
-        // leaves exactly one "Connect" on screen to press.
+        // Google Drive has no connector, so no Connect button — better than a
+        // greyed one that invites a press it can never honour, and it leaves
+        // exactly one "Connect" on screen to press.
+        //
+        // In a debug build it does have a row: DemoAccounts seeds one so the
+        // wizard has a destination to offer. Saying "not supported yet" beside
+        // an account the wizard will happily use would be the lie, so what is
+        // asserted here is the demo account, not that sentence.
         compose.awaitText("Google Drive")
-        compose.awaitText("Not supported in this version yet")
+        compose.awaitText("demo-destination@example.invalid")
 
-        // The demo provider has no account, no sign-in and nothing to revoke,
-        // so it has no row here even though the wizard offers it in debug.
+        // The demo provider is not something anyone signs in to, so §24.5
+        // leaves it out even though §24.2 offers it in debug.
         assertTrue(
             "the demo provider is listed as something you could sign in to",
             compose.onAllNodesWithText("Demo provider", useUnmergedTree = true).fetchSemanticsNodes().isEmpty(),
@@ -92,5 +97,28 @@ class AccountsScreenTest {
         compose.node("Back").performClick()
 
         compose.awaitText("New Transfer")
+    }
+
+    @Test
+    fun disconnecting_an_account_with_no_connector_does_not_crash() {
+        // The demo Drive row has a Disconnect button and no connector behind
+        // it. Looking that connector up with error() threw
+        // IllegalStateException, which §24.5's error handling does not catch,
+        // so the press took the app down.
+        compose.node("Accounts").performClick()
+        compose.awaitText("demo-destination@example.invalid")
+
+        // "Disconnect…" opens the confirmation; "Disconnect" inside it acts.
+        compose.node("Disconnect\u2026").performClick()
+        compose.awaitText("will revoke its access")
+        compose.node("Disconnect").performClick()
+
+        // The row is gone and the app is still here.
+        compose.awaitText("Accounts")
+        assertTrue(
+            "the demo Drive account survived being disconnected",
+            compose.onAllNodesWithText("demo-destination@example.invalid", useUnmergedTree = true)
+                .fetchSemanticsNodes().isEmpty(),
+        )
     }
 }

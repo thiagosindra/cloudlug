@@ -1,4 +1,4 @@
-# Status — v0.3.2 (Dropbox connects)
+# Status — v0.4 in progress (two accounts, one provider)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account** rather than against a fake that agrees with
@@ -251,9 +251,11 @@ share.
   a phone, and cannot run in CI — but it has now run there successfully, which
   is a different thing from untested (see below).
 - **A transfer that actually moves bytes between two real accounts.** This has
-  never happened. It cannot until v0.4 gives Dropbox somewhere to send them, or
-  until a second Dropbox account is connected — which the adapter cannot do yet
-  (see the gaps below).
+  never happened, and it is what v0.4 exists to make possible: the adapter can
+  now hold two Dropbox accounts at once, so the next thing to try is a real
+  Dropbox-to-Dropbox transfer. Everything §22 and §21 do — chunking,
+  verification, pause, resume, collisions — has been exercised against the
+  fake only.
 - **Rate limits, throttling and `Retry-After`.** The §23 mapping is tested
   against synthetic bodies. No real 429 has been seen.
 - **Large files, deep trees, awkward names.** The live suite uses small
@@ -321,20 +323,16 @@ counter (§11).
 6. ~~**`content_hash` is validated against independently computed vectors and
    against the JDK, not against live Dropbox responses.**~~ Done, 2026-09-20:
    all four §36 cases matched. See above.
-7. **One Dropbox account per install.** `AccountId`'s own documentation says
-   multiple accounts per provider are supported, and the engine is ready for
-   it — every `CloudProvider` method takes an `AccountId`. The gap is entirely
-   in this adapter: `DropboxTokenSource` has no account parameter, so one
-   process holds one Dropbox credential, and `KeystoreRefreshTokens` stores it
-   under a single fixed key.
+7. ~~**One Dropbox account per install.**~~ Fixed in v0.4. `DropboxTokenSource`,
+   `DropboxApi` and the refresh-token store take an `AccountId`; §2.2 now
+   rejects the same *account* rather than the same provider; §24.2 picks
+   accounts rather than providers.
 
-   This is not hypothetical. Dropbox-to-Dropbox between two of a user's own
-   accounts is a plausible first thing to want, and it is the one shape of
-   transfer this build cannot express. The fix is to thread `AccountId` through
-   the token source and key the credential by it; `authenticate()` is the only
-   call without one, and the grant already carries `account_id` in its token
-   response, so it need not be invented. **v0.4**, because Google Drive wants
-   exactly the same change and doing it twice would be the waste.
+   **Not yet proven on a device.** The unit tests cover two accounts not
+   sharing a token, a rotated credential filed against the right account, and
+   the amended §2.2 rule — but no Dropbox-to-Dropbox transfer has run, because
+   that needs two real accounts connected on a phone. Until it does, the
+   engine has still only ever moved bytes between two fakes.
 8. **Nothing enforces main-safety anywhere else.** `MainSafetyTest` covers
    `:providers:dropbox`, which is where the blocking is today. Google Drive's
    adapter will have the same shape and nothing would catch a repeat except

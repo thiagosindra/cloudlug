@@ -19,6 +19,7 @@ import dev.thiagosindra.cloudlug.provider.dropbox.DropboxTokenClient
 import dev.thiagosindra.cloudlug.provider.dropbox.StoredDropboxTokenSource
 import dev.thiagosindra.cloudlug.security.KeystoreSecretStore
 import dev.thiagosindra.cloudlug.security.SecretStore
+import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -72,14 +73,9 @@ object AuthModule {
     ) = StoredDropboxTokenSource(
         tokens = tokenClient,
         store = refreshTokens,
-        // §7's granted scopes, read from the account row on every launch after
-        // the one that created it.
-        scopes = {
-            database.accounts.listAll()
-                .firstOrNull { it.provider == ProviderType.DROPBOX }
-                ?.grantedScopes
-                .orEmpty()
-        },
+        // §7's granted scopes, read from that account's row on every launch
+        // after the one that created it.
+        scopes = { account -> database.accounts.findById(account)?.grantedScopes.orEmpty() },
     )
 
     @Provides
@@ -116,5 +112,6 @@ object AuthModule {
     fun accountRepository(
         database: CloudLugDatabase,
         connectors: Map<ProviderType, @JvmSuppressWildcards AccountConnector>,
-    ) = AccountRepository(database, connectors)
+        providers: ProviderRegistry,
+    ) = AccountRepository(database, connectors, providers)
 }

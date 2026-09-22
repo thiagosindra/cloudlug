@@ -24,12 +24,10 @@ data class AvailableProviders(val types: List<ProviderType>) {
         require(types.isNotEmpty()) { "At least one provider must be available" }
     }
 
-    /**
-     * Destinations legal for [source]. §2.2 prohibits same-provider transfers in
-     * the transfer domain, so the wizard disables the choice rather than letting
-     * the user reach a rejection.
-     */
-    fun destinationsFor(source: ProviderType?): List<ProviderType> = types.filter { it != source }
+    // destinationsFor(source) lived here until v0.4. It filtered out the
+    // source's own provider, which §2.2 no longer prohibits, and nothing
+    // called it: the wizard picks accounts now, and §2.2's rule is about the
+    // pair of account ids rather than the pair of providers.
 }
 
 fun interface ProviderRegistry {

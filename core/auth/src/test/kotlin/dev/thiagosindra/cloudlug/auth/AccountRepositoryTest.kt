@@ -1,6 +1,7 @@
 package dev.thiagosindra.cloudlug.auth
 
 import android.content.Intent
+import dev.thiagosindra.cloudlug.database.entity.AccountEntity
 import dev.thiagosindra.cloudlug.database.inmemory.InMemoryCloudLugDatabase
 import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.ProviderType
@@ -8,6 +9,8 @@ import dev.thiagosindra.cloudlug.provider.AccountRoles
 import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
+import dev.thiagosindra.cloudlug.provider.fake.FakeCloudProvider
+import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Test
@@ -58,9 +61,26 @@ class AccountRepositoryTest {
     }
 
     private val connector = RecordingConnector()
+
+    /**
+     * Only reached for a provider with no connector — §7's fallback to what
+     * §5 says the build can do at all. Drive declares itself destination-only,
+     * which is what §8.2's `drive.file` actually permits.
+     */
+    private val providers = ProviderRegistry { type ->
+        FakeCloudProvider(
+            type = type,
+            capabilities = FakeCloudProvider.defaultCapabilities(
+                canBeSource = type != ProviderType.GOOGLE_DRIVE,
+                canBeDestination = true,
+            ),
+        )
+    }
+
     private val repository = AccountRepository(
         database,
         mapOf(ProviderType.DROPBOX to connector),
+        providers,
         clock = { Instant.parse("2026-09-21T10:00:00Z") },
     )
 
@@ -125,32 +145,65 @@ class AccountRepositoryTest {
         // is a real, usable account that cannot be a destination.
         repository.completeConnection(ProviderType.DROPBOX, result = null)
 
-        val roles = assertNotNull(repository.rolesFor(repository.observe().first().single()))
+        val roles = repository.rolesFor(repository.observe().first().single())
 
         assertTrue(roles.canBeSource)
         assertTrue(!roles.canBeDestination)
     }
 
     @Test
-    fun `a provider with no connector has no roles and offers no connect`() = runTest {
-        // Google Drive until v0.4: §24.5 shows it as unsupported rather than
-        // being handed a connector that throws when tapped.
+    fun `a provider with no connector offers no connect`() = runTest {
+        // Google Drive: §24.5 shows it as unsupported rather than being handed
+        // a connector that throws when tapped.
         assertTrue(!repository.canConnect(ProviderType.GOOGLE_DRIVE))
         assertTrue(repository.canConnect(ProviderType.DROPBOX))
+    }
 
+    @Test
+    fun `an account whose provider cannot interpret scopes falls back to declared capabilities`() = runTest {
+        // There is no connector, so there was no grant in this build to read —
+        // and inventing one would be worse than asking the adapter what it can
+        // do at all. This is how the demo accounts get roles, and how a Drive
+        // account would before its connector exists.
         val drive = CloudAccount(
             id = AccountId("drive:1"),
             provider = ProviderType.GOOGLE_DRIVE,
             displayName = null,
             displayEmail = null,
-            grantedScopes = setOf("drive.file"),
+            grantedScopes = emptySet(),
         )
-        assertNull(repository.rolesFor(drive))
+
+        val roles = repository.rolesFor(drive)
+
+        assertTrue(!roles.canBeSource, "§8.2: drive.file cannot read an arbitrary source")
+        assertTrue(roles.canBeDestination)
     }
 
     @Test
     fun `granted scopes for a provider nobody connected are empty, not an error`() = runTest {
         assertTrue(repository.grantedScopes(ProviderType.DROPBOX).isEmpty())
         assertNull(repository.connected(ProviderType.DROPBOX))
+    }
+
+    @Test
+    fun `disconnecting an account whose provider has no connector just forgets it`() = runTest {
+        // A demo row, or a provider a later build stopped supporting. There is
+        // no grant to revoke. Looking the connector up with error() threw
+        // IllegalStateException, which is not a CloudException, so it fell past
+        // §24.5's error handling and crashed the app on a button press.
+        database.accounts.upsert(
+            AccountEntity(
+                id = AccountId("demo-destination"),
+                provider = ProviderType.GOOGLE_DRIVE,
+                providerAccountId = "demo-destination",
+                grantedScopes = emptySet(),
+                createdAt = Instant.parse("2026-09-22T10:00:00Z"),
+            ),
+        )
+
+        repository.disconnect(AccountId("demo-destination"))
+
+        assertNull(database.accounts.findById(AccountId("demo-destination")))
+        assertTrue(connector.calls.isEmpty(), "the Dropbox connector was asked to revoke somebody else's account")
     }
 }

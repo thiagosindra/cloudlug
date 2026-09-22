@@ -37,6 +37,7 @@ import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
 import dev.thiagosindra.cloudlug.ui.SingleLine
 import dev.thiagosindra.cloudlug.ui.formatBytes
 import dev.thiagosindra.cloudlug.ui.formatCount
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.ui.providerLabel
 
 // TopAppBar is still ExperimentalMaterial3Api. Opted into here rather than
@@ -96,19 +97,23 @@ fun NewTransferScreen(
 
             Column(Modifier.weight(1f)) {
                 when (state.step) {
-                    WizardStep.SOURCE -> ProviderList(
-                        providers = state.availableProviders,
+                    // §7 decides which accounts each step offers: reading and
+                    // writing are separate grants, so the two lists can differ.
+                    WizardStep.SOURCE -> AccountList(
+                        accounts = state.sourceChoices,
                         selected = state.source,
-                        disabled = emptySet(),
+                        empty = "No connected account can be a source. Connect one on the " +
+                            "Accounts screen, and accept the read permissions.",
                         onSelect = viewModel::chooseSource,
                     )
 
-                    WizardStep.DESTINATION -> ProviderList(
-                        providers = state.availableProviders,
+                    // §2.2 as amended: the source account is excluded, not its
+                    // provider. A second Dropbox account is a legal destination.
+                    WizardStep.DESTINATION -> AccountList(
+                        accounts = state.destinationChoices,
                         selected = state.destination,
-                        // §2.2: same-provider transfers are prohibited, so the
-                        // source is shown disabled rather than silently missing.
-                        disabled = setOfNotNull(state.source),
+                        empty = "No other connected account can be a destination. Connect a " +
+                            "second account on the Accounts screen.",
                         onSelect = viewModel::chooseDestination,
                     )
 
@@ -199,29 +204,34 @@ fun NewTransferScreen(
 }
 
 @Composable
-private fun ProviderList(
-    providers: List<dev.thiagosindra.cloudlug.model.ProviderType>,
-    selected: dev.thiagosindra.cloudlug.model.ProviderType?,
-    disabled: Set<dev.thiagosindra.cloudlug.model.ProviderType>,
-    onSelect: (dev.thiagosindra.cloudlug.model.ProviderType) -> Unit,
+private fun AccountList(
+    accounts: List<ConnectedAccount>,
+    selected: AccountId?,
+    empty: String,
+    onSelect: (AccountId) -> Unit,
 ) {
+    if (accounts.isEmpty()) {
+        Text(empty, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(16.dp))
+        return
+    }
+
     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(providers, key = { it.name }) { type ->
-            val isDisabled = type in disabled
+        items(accounts, key = { it.account.id.value }) { connected ->
+            val account = connected.account
             ListItem(
-                modifier = Modifier.clickable(enabled = !isDisabled) { onSelect(type) },
-                headlineContent = { Text(providerLabel(type)) },
-                supportingContent = if (isDisabled) {
-                    { Text("Already the source of this transfer", style = MaterialTheme.typography.bodySmall) }
-                } else {
-                    null
+                modifier = Modifier.clickable { onSelect(account.id) },
+                // The provider leads, because it is what distinguishes the
+                // rows when only one account of each is connected — and the
+                // address below distinguishes them when two of one are.
+                headlineContent = { Text(providerLabel(account.provider)) },
+                supportingContent = {
+                    Text(
+                        account.displayEmail ?: account.displayName ?: account.id.value,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 },
                 leadingContent = {
-                    RadioButton(
-                        selected = selected == type,
-                        onClick = { if (!isDisabled) onSelect(type) },
-                        enabled = !isDisabled,
-                    )
+                    RadioButton(selected = selected == account.id, onClick = { onSelect(account.id) })
                 },
             )
         }
@@ -253,10 +263,10 @@ private fun Review(state: WizardState, viewModel: NewTransferViewModel) {
     Column {
         Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
             Column(Modifier.padding(16.dp)) {
-                Text(
-                    "${providerLabel(state.source!!)} -> ${providerLabel(state.destination!!)}",
-                    style = MaterialTheme.typography.titleSmall,
-                )
+                // Named by account, not just by provider: with two Dropbox
+                // accounts connected, "Dropbox -> Dropbox" would not say which
+                // way round this transfer goes.
+                Text(state.directionLabel(), style = MaterialTheme.typography.titleSmall)
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 ReviewRow("Files", formatCount(summary.files))
                 ReviewRow("Folders", formatCount(summary.folders))

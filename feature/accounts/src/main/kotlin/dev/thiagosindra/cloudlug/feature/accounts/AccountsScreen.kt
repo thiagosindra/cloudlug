@@ -14,14 +14,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -38,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.provider.AccountRoles
+import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.ui.providerLabel
 
 /**
@@ -108,7 +109,7 @@ fun AccountsScreen(
                         row = row,
                         enabled = !state.working,
                         onConnect = { viewModel.requestConnect(row.provider) },
-                        onDisconnect = { row.account?.let(viewModel::requestDisconnect) },
+                        onDisconnect = viewModel::requestDisconnect,
                     )
                 }
             }
@@ -138,7 +139,7 @@ private fun ProviderCard(
     row: AccountRow,
     enabled: Boolean,
     onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
+    onDisconnect: (CloudAccount) -> Unit,
 ) {
     Card(
         Modifier
@@ -148,44 +149,73 @@ private fun ProviderCard(
         Column(Modifier.padding(16.dp)) {
             Text(providerLabel(row.provider), style = MaterialTheme.typography.titleMedium)
 
-            val account = row.account
-            if (account == null) {
+            if (!row.connected) {
                 Text(
                     if (row.connectable) "Not connected" else "Not supported in this version yet",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else {
-                account.displayName?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                account.displayEmail?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                row.roles?.let { RoleSummary(it) }
-                GrantedScopes(account.grantedScopes)
             }
 
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (account == null) {
-                    // No button at all for a provider this build cannot connect
-                    // yet. A permanently greyed "Connect" invites a press that
-                    // can never do anything; the row already says why.
-                    if (row.connectable) {
-                        OutlinedButton(onClick = onConnect, enabled = enabled) { Text("Connect") }
+            row.accounts.forEachIndexed { index, connected ->
+                if (index > 0) HorizontalDivider(Modifier.padding(vertical = 12.dp))
+                ConnectedAccountBlock(
+                    connected = connected,
+                    enabled = enabled,
+                    onDisconnect = { onDisconnect(connected.account) },
+                )
+            }
+
+            if (row.connectable) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    // Two accounts of one provider are the two ends of a
+                    // transfer (§2.2 as amended), so connecting another is a
+                    // normal thing to want rather than an edge case.
+                    OutlinedButton(onClick = onConnect, enabled = enabled) {
+                        Text(if (row.connected) "Connect another account" else "Connect")
                     }
-                } else {
-                    OutlinedButton(onClick = onDisconnect, enabled = enabled) { Text("Disconnect") }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ConnectedAccountBlock(
+    connected: ConnectedAccount,
+    enabled: Boolean,
+    onDisconnect: () -> Unit,
+) {
+    val account = connected.account
+    Column(Modifier.padding(top = 8.dp)) {
+        account.displayName?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        account.displayEmail?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        connected.roles?.let { RoleSummary(it) }
+        GrantedScopes(account.grantedScopes)
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // The ellipsis is the old convention for "this opens something
+            // else rather than acting now", which is true — §8.3's disconnect
+            // is confirmed first. It also keeps this button distinct from the
+            // dialog's, which matters to anything matching on text.
+            OutlinedButton(onClick = onDisconnect, enabled = enabled) { Text("Disconnect…") }
         }
     }
 }
@@ -212,7 +242,14 @@ private fun RoleSummary(roles: AccountRoles) {
     )
 }
 
-/** §7's granted scopes, shown verbatim: this is the account's actual authority. */
+/**
+ * §7's granted scopes, shown verbatim: this is the account's actual authority.
+ *
+ * Bordered labels rather than chips. These were `AssistChip(enabled = false)`,
+ * which Material draws at 38% alpha — so they read as *unavailable* rather
+ * than as information, and were hard to read besides. They are not controls
+ * and should not look like disabled ones.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GrantedScopes(scopes: Set<String>) {
@@ -220,14 +257,20 @@ private fun GrantedScopes(scopes: Set<String>) {
     FlowRow(
         Modifier.padding(top = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         scopes.sorted().forEach { scope ->
-            AssistChip(
-                onClick = {},
-                enabled = false,
-                label = { Text(scope, style = MaterialTheme.typography.labelSmall) },
-                colors = AssistChipDefaults.assistChipColors(),
-            )
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) {
+                Text(
+                    scope,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }

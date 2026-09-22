@@ -163,7 +163,7 @@ class DropboxConnector(
         // the user can try again. Clearing it first would strand a live grant
         // on their Dropbox account with nothing left that could revoke it.
         dropbox.disconnect(account)
-        credentials.clear()
+        credentials.clear(account)
         pending.discard()
     }
 

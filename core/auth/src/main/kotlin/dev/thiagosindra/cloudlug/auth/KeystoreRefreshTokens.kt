@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.auth
 
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxRefreshTokenStore
 import dev.thiagosindra.cloudlug.security.SecretStore
 
@@ -14,30 +15,51 @@ import dev.thiagosindra.cloudlug.security.SecretStore
  * [SecretStore.get] answers null for a credential it cannot decrypt, having
  * first said so at warning level, so a tampered or orphaned credential arrives
  * here as "not connected" and the user reconnects.
+ *
+ * One key per account as of v0.4. A Dropbox-to-Dropbox transfer holds two
+ * accounts of the same provider at once, so a single key would have had the
+ * destination's credential overwriting the source's at connect time.
  */
 class KeystoreRefreshTokens(
     private val secrets: SecretStore,
-    private val key: String = DROPBOX_REFRESH_TOKEN,
 ) : DropboxRefreshTokenStore {
 
-    override fun read(): String? = secrets.get(key)
+    override fun read(account: AccountId): String? =
+        secrets.get(keyFor(account)) ?: adoptLegacyCredential(account)
 
-    override fun write(token: String) = secrets.put(key, token)
+    override fun write(account: AccountId, token: String) = secrets.put(keyFor(account), token)
 
-    override fun clear() = secrets.remove(key)
+    override fun clear(account: AccountId) {
+        secrets.remove(keyFor(account))
+        secrets.remove(LEGACY_KEY)
+    }
+
+    /**
+     * Moves a credential written before keys carried an account id.
+     *
+     * Without this an upgrade is silently broken in the worst way: the account
+     * row survives in Room, so §24.5 still says connected, while the
+     * credential sits under a key nothing looks at any more. The first
+     * transfer fails `AUTH_REQUIRED` and nothing on screen explains why.
+     *
+     * Safe precisely because of the limitation it is migrating away from — a
+     * build that wrote this key could hold exactly one Dropbox account, so
+     * there is no ambiguity about whose credential it is. It runs once: the
+     * legacy key is removed as the value is rewritten under the new one.
+     */
+    private fun adoptLegacyCredential(account: AccountId): String? {
+        val legacy = secrets.get(LEGACY_KEY) ?: return null
+        secrets.put(keyFor(account), legacy)
+        secrets.remove(LEGACY_KEY)
+        return legacy
+    }
+
+    private fun keyFor(account: AccountId) = "$KEY_PREFIX${account.value}"
 
     private companion object {
-        /**
-         * One Dropbox account for now.
-         *
-         * `AccountId`'s own documentation says multiple accounts per provider
-         * are supported, and the engine is ready for it: every `CloudProvider`
-         * method takes one. The gap is narrower than it looks and entirely in
-         * this adapter — `DropboxTokenSource` has no account parameter, so one
-         * process can hold one Dropbox credential. Recorded in docs/status.md
-         * as a v0.4 item, because Google Drive will want the same fix and the
-         * two are the same change.
-         */
-        const val DROPBOX_REFRESH_TOKEN = "dropbox.refresh-token"
+        const val KEY_PREFIX = "dropbox.refresh-token."
+
+        /** What v0.3 wrote, when one process could hold one Dropbox account. */
+        const val LEGACY_KEY = "dropbox.refresh-token"
     }
 }

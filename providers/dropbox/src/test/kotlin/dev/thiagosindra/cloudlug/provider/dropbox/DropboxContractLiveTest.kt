@@ -109,8 +109,13 @@ class DropboxContractLiveTest : ProviderContractTest() {
      */
     private object LiveTokens : DropboxTokenSource {
         private val token: String by lazy { DropboxLive.accessToken(client) }
-        override suspend fun accessToken(): String = token
-        override suspend fun grantedScopes(): Set<String> = DropboxOAuth.SCOPES.toSet()
+        override suspend fun accessToken(account: AccountId): String = token
+        override suspend fun grantedScopes(account: AccountId): Set<String> = DropboxOAuth.SCOPES.toSet()
+
+        // One refresh token, one account — the live suite has no second one to
+        // confuse this with, which is why authenticate() can be answered from
+        // the same credential every other call uses.
+        override suspend fun accountJustConnected(): AccountId = accountId
     }
 
     companion object {

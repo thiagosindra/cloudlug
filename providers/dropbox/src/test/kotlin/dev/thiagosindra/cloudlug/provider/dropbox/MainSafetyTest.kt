@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
+import dev.thiagosindra.cloudlug.model.AccountId
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
@@ -129,7 +130,7 @@ class MainSafetyTest {
         server.enqueue(MockResponse().setBody("""{"account_id":"dbid:AAA"}"""))
         val api = DropboxApi(StaticToken, recordingClient())
 
-        pretendMain().use { main -> withContext(main) { api.rpc("/2/files/get_metadata") } }
+        pretendMain().use { main -> withContext(main) { api.rpc(ACCOUNT, "/2/files/get_metadata") } }
 
         assertLeftTheCallersThread()
     }
@@ -141,7 +142,7 @@ class MainSafetyTest {
         server.enqueue(MockResponse().setBody("""{"account_id":"dbid:AAA"}"""))
         val api = DropboxApi(StaticToken, recordingClient())
 
-        pretendMain().use { main -> withContext(main) { api.rpcWithoutArgument("/2/users/get_current_account") } }
+        pretendMain().use { main -> withContext(main) { api.rpcWithoutArgument(ACCOUNT, "/2/users/get_current_account") } }
 
         assertLeftTheCallersThread()
     }
@@ -152,7 +153,7 @@ class MainSafetyTest {
         val api = DropboxApi(StaticToken, recordingClient())
 
         pretendMain().use { main ->
-            withContext(main) { api.content("/2/files/download", kotlinx.serialization.json.buildJsonObject { }).close() }
+            withContext(main) { api.content(ACCOUNT, "/2/files/download", kotlinx.serialization.json.buildJsonObject { }).close() }
         }
 
         assertLeftTheCallersThread()
@@ -166,7 +167,7 @@ class MainSafetyTest {
 
         pretendMain().use { main ->
             withContext(main) {
-                api.contentAllowingFailure("/2/files/upload_session/append_v2", kotlinx.serialization.json.buildJsonObject { })
+                api.contentAllowingFailure(ACCOUNT, "/2/files/upload_session/append_v2", kotlinx.serialization.json.buildJsonObject { })
             }
         }
 
@@ -174,11 +175,13 @@ class MainSafetyTest {
     }
 
     private object StaticToken : DropboxTokenSource {
-        override suspend fun accessToken() = "an-access-token"
-        override suspend fun grantedScopes() = DropboxOAuth.SCOPES.toSet()
+        override suspend fun accessToken(account: AccountId) = "an-access-token"
+        override suspend fun grantedScopes(account: AccountId) = DropboxOAuth.SCOPES.toSet()
+        override suspend fun accountJustConnected() = ACCOUNT
     }
 
     private companion object {
         const val PRETEND_MAIN = "pretend-main-looper"
+        val ACCOUNT = AccountId("dbid:AAA")
     }
 }

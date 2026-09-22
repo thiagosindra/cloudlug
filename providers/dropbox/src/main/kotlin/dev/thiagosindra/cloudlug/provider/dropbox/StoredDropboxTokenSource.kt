@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
 import kotlinx.coroutines.sync.Mutex
@@ -19,9 +20,9 @@ import kotlin.time.Duration.Companion.minutes
  * unreadable credential as absent, so [read] answering null is the recovery.
  */
 interface DropboxRefreshTokenStore {
-    fun read(): String?
-    fun write(token: String)
-    fun clear()
+    fun read(account: AccountId): String?
+    fun write(account: AccountId, token: String)
+    fun clear(account: AccountId)
 }
 
 /**
@@ -37,19 +38,42 @@ interface DropboxRefreshTokenStore {
  * at the moment the token expires: Dropbox answers each of them, every answer
  * but the last is thrown away, and the account has spent its rate limit
  * discovering the same token repeatedly.
+ *
+ * ### One instance, many accounts
+ *
+ * v0.4 made this per-account. A Dropbox-to-Dropbox transfer has two of the
+ * same provider's accounts in flight at once — reading from one and writing to
+ * the other — so a single cached token, or a single stored credential key,
+ * would have had the destination's token answering the source's requests.
+ *
+ * The mutex stays one for the instance rather than one per account. Refreshes
+ * are brief and rare, contention between two accounts is not worth a second
+ * lock, and one lock is one thing to reason about.
  */
 class StoredDropboxTokenSource(
     private val tokens: DropboxTokenClient,
     private val store: DropboxRefreshTokenStore,
-    private val scopes: suspend () -> Set<String>,
+    private val scopes: suspend (AccountId) -> Set<String>,
     private val now: () -> Long = System::currentTimeMillis,
     private val skew: Duration = DEFAULT_SKEW,
 ) : DropboxTokenSource {
 
     private val mutex = Mutex()
-    private var cached: String? = null
-    private var expiresAtMillis = 0L
-    private var grantedScopes: Set<String> = emptySet()
+    private val cached = mutableMapOf<AccountId, CachedToken>()
+    private val grantedScopes = mutableMapOf<AccountId, Set<String>>()
+
+    /** An access token and when this source stops trusting it. */
+    private data class CachedToken(val value: String, val expiresAtMillis: Long)
+
+    /**
+     * The account whose grant was adopted most recently (§8.1).
+     *
+     * [DropboxCloudProvider.authenticate] is the call that *discovers* an
+     * account id, so it has none to pass; this is how it knows whose token to
+     * send. Dropbox puts `account_id` in the token response, so the answer is
+     * known before the call that asks who the user is.
+     */
+    private var lastAdopted: AccountId? = null
 
     /**
      * Takes over a grant that has just been completed (§8.1).
@@ -64,16 +88,25 @@ class StoredDropboxTokenSource(
      * row they belong in has not been written yet.
      */
     suspend fun adopt(grant: DropboxGrant) = mutex.withLock {
-        grant.refreshToken?.let(store::write)
-        cached = grant.accessToken
-        expiresAtMillis = now() + (grant.expiresIn - skew).coerceAtLeast(Duration.ZERO).inWholeMilliseconds
-        if (grant.grantedScopes.isNotEmpty()) grantedScopes = grant.grantedScopes
+        val account = AccountId(
+            requireNotNull(grant.accountId) {
+                "Dropbox returned no account_id, so this grant cannot be filed against an account"
+            },
+        )
+
+        grant.refreshToken?.let { store.write(account, it) }
+        cached[account] = CachedToken(
+            value = grant.accessToken,
+            expiresAtMillis = now() + (grant.expiresIn - skew).coerceAtLeast(Duration.ZERO).inWholeMilliseconds,
+        )
+        if (grant.grantedScopes.isNotEmpty()) grantedScopes[account] = grant.grantedScopes
+        lastAdopted = account
     }
 
-    override suspend fun accessToken(): String = mutex.withLock {
-        cached?.takeIf { now() < expiresAtMillis }?.let { return@withLock it }
+    override suspend fun accessToken(account: AccountId): String = mutex.withLock {
+        cached[account]?.takeIf { now() < it.expiresAtMillis }?.let { return@withLock it.value }
 
-        val refreshToken = store.read()
+        val refreshToken = store.read(account)
             ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "this Dropbox account is not connected")
 
         val grant = tokens.refresh(refreshToken)
@@ -81,10 +114,12 @@ class StoredDropboxTokenSource(
         // Only when Dropbox sent one. A refresh response carries no
         // refresh_token, and writing that null over the stored token would
         // disconnect the account at the moment it was being kept alive.
-        grant.refreshToken?.let(store::write)
+        grant.refreshToken?.let { store.write(account, it) }
 
-        cached = grant.accessToken
-        expiresAtMillis = now() + (grant.expiresIn - skew).coerceAtLeast(Duration.ZERO).inWholeMilliseconds
+        cached[account] = CachedToken(
+            value = grant.accessToken,
+            expiresAtMillis = now() + (grant.expiresIn - skew).coerceAtLeast(Duration.ZERO).inWholeMilliseconds,
+        )
         grant.accessToken
     }
 
@@ -94,8 +129,13 @@ class StoredDropboxTokenSource(
      * The grant knows them first — during [adopt] the account row does not
      * exist yet — and the account record knows them on every later launch.
      */
-    override suspend fun grantedScopes(): Set<String> =
-        grantedScopes.takeIf { it.isNotEmpty() } ?: scopes()
+    override suspend fun grantedScopes(account: AccountId): Set<String> =
+        grantedScopes[account]?.takeIf { it.isNotEmpty() } ?: scopes(account)
+
+    /** See [lastAdopted]. */
+    override suspend fun accountJustConnected(): AccountId = mutex.withLock {
+        checkNotNull(lastAdopted) { "no Dropbox grant has been adopted in this process" }
+    }
 
     companion object {
         /**
