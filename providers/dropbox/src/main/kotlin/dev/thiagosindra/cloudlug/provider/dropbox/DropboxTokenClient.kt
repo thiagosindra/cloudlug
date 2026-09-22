@@ -2,6 +2,9 @@ package dev.thiagosindra.cloudlug.provider.dropbox
 
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -46,10 +49,17 @@ data class DropboxGrant(
  *
  * [tokenEndpoint] is injectable so tests can point it at a local server. It is
  * never read from user input.
+ *
+ * Both entry points move to [io] before blocking. `suspend` alone would not:
+ * it runs on the caller's dispatcher, and this class's first caller outside
+ * the transfer engine was the accounts screen on `Dispatchers.Main`, which
+ * Android killed with `NetworkOnMainThreadException` the moment the user came
+ * back from the consent screen.
  */
 class DropboxTokenClient(
     private val client: OkHttpClient,
     private val tokenEndpoint: String = DropboxOAuth.TOKEN_ENDPOINT,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -70,13 +80,13 @@ class DropboxTokenClient(
      */
     suspend fun refresh(refreshToken: String): DropboxGrant = post(DropboxOAuth.refreshForm(refreshToken))
 
-    private fun post(form: Map<String, String>): DropboxGrant {
+    private suspend fun post(form: Map<String, String>): DropboxGrant = withContext(io) {
         val request = Request.Builder()
             .url(tokenEndpoint)
             .post(DropboxOAuth.formBody(form).toRequestBody(FORM_MEDIA_TYPE))
             .build()
 
-        return client.newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw DropboxErrors.toException(response.code, text)
             parse(text)

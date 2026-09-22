@@ -2,6 +2,9 @@ package dev.thiagosindra.cloudlug.provider.dropbox
 
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -43,6 +46,22 @@ interface DropboxTokenSource {
 /**
  * The HTTP shape of the Dropbox API, with §23 and §26 already applied.
  *
+ * ### Main-safety
+ *
+ * Every method here is `suspend` **and** moves to [io] before blocking. Those
+ * are two different promises and only the second one is real: `suspend` does
+ * not move work off a thread, it runs on whatever dispatcher the caller is
+ * already on. OkHttp's `execute()` blocks, so a `suspend` function that calls
+ * it without switching is main-unsafe while looking exactly like a function
+ * that is not.
+ *
+ * That cost a crash. Every caller until v0.3 was the transfer engine, whose
+ * scope is `Dispatchers.IO`, so the adapter was accidentally correct for its
+ * only caller. The accounts screen called the same code from
+ * `viewModelScope`, which is `Dispatchers.Main`, and Android killed the
+ * process with `NetworkOnMainThreadException` — after the user had already
+ * granted consent.
+ *
  * Dropbox splits its surface across two hosts with different conventions: RPC
  * routes take JSON in the body, content routes take JSON in a header and bytes
  * in the body. Both are here so that [DropboxCloudProvider] reads as the
@@ -55,15 +74,16 @@ interface DropboxTokenSource {
 internal class DropboxApi(
     private val tokens: DropboxTokenSource,
     private val client: OkHttpClient,
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
 
     private val json = Json { ignoreUnknownKeys = true }
 
     /** A JSON-in, JSON-out route on api.dropboxapi.com. */
-    suspend fun rpc(route: String, arg: JsonObject = buildJsonObject { }): JsonObject {
+    suspend fun rpc(route: String, arg: JsonObject = buildJsonObject { }): JsonObject = withContext(io) {
         val body = json.encodeToString(JsonObject.serializer(), arg).toRequestBody(JSON_MEDIA_TYPE)
         val request = authorized(Request.Builder().url("$API_HOST$route").post(body))
-        return client.newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw response.toCloudException(text)
             if (text.isBlank()) buildJsonObject { } else json.parseToJsonElement(text).jsonObject
@@ -76,9 +96,9 @@ internal class DropboxApi(
      * Dropbox rejects these with a `Content-Type` set, so the body is empty and
      * untyped — an easy thing to get wrong once and then carry everywhere.
      */
-    suspend fun rpcWithoutArgument(route: String): JsonObject {
+    suspend fun rpcWithoutArgument(route: String): JsonObject = withContext(io) {
         val request = authorized(Request.Builder().url("$API_HOST$route").post(EMPTY_BODY))
-        return client.newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw response.toCloudException(text)
             if (text.isBlank()) buildJsonObject { } else json.parseToJsonElement(text).jsonObject
@@ -97,7 +117,7 @@ internal class DropboxApi(
         arg: JsonObject,
         payload: RequestBody? = null,
         range: LongRange? = null,
-    ): Response {
+    ): Response = withContext(io) {
         val builder = Request.Builder()
             .url("$CONTENT_HOST$route")
             .header(ARG_HEADER, json.encodeToString(JsonObject.serializer(), arg))
@@ -111,7 +131,10 @@ internal class DropboxApi(
             response.close()
             throw response.toCloudException(text)
         }
-        return response
+        // The body is deliberately left open: the caller streams it. Reading
+        // those bytes blocks too, and that read is the caller's to place —
+        // §14's pipeline does it on its own IO scope.
+        response
     }
 
     /**
@@ -126,13 +149,13 @@ internal class DropboxApi(
         route: String,
         arg: JsonObject,
         payload: RequestBody? = null,
-    ): Pair<Int, String> {
+    ): Pair<Int, String> = withContext(io) {
         val builder = Request.Builder()
             .url("$CONTENT_HOST$route")
             .header(ARG_HEADER, json.encodeToString(JsonObject.serializer(), arg))
             .post(payload ?: EMPTY_BODY)
         if (payload != null) builder.header("Content-Type", "application/octet-stream")
-        return client.newCall(authorized(builder)).execute().use { it.code to it.body?.string().orEmpty() }
+        client.newCall(authorized(builder)).execute().use { it.code to it.body?.string().orEmpty() }
     }
 
     /** Maps a status and body through §23, for a caller that read them itself. */
