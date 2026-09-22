@@ -94,9 +94,38 @@ abstract class ProviderContractTest {
 
         // A picker that gets a whole subtree cannot draw a folder row, and §9
         // has the user descend one level at a time.
+        //
+        // Anchored on the positive case first: "does not contain `nested`" is
+        // satisfied by an adapter that returns nothing at all, so on its own it
+        // would pass for a picker that shows the user an empty account.
+        assertTrue(
+            children.any { it.id == top },
+            "listChildren must return the level it was asked for: ${children.map { it.name }}",
+        )
         assertTrue(
             children.none { it.id == nested },
             "listChildren must not descend: ${children.map { it.name }}",
+        )
+    }
+
+    @Test
+    fun `enumerate emits every selection root`() = runTest {
+        val provider = newProvider()
+        val root = rootFolder(provider)
+        val photos = seedFolder(provider, root, "photos")
+        seedFile(provider, photos, "1.png", byteArrayOf(1))
+
+        val emitted = provider.enumerate(account(provider), selectionOf(provider, photos)).toList()
+
+        // The selected folder is part of the transfer, not merely a cursor into
+        // it: §10 reproduces the source's own ancestors, so `photos` itself has
+        // to arrive or the manifest has nowhere to hang its children. The
+        // Dropbox adapter listed the root's *contents* and never emitted the
+        // root, which `ManifestBuilder` answers with "emitted before its
+        // parent" on the very first child.
+        assertTrue(
+            emitted.any { it.id == photos },
+            "the selection root must be emitted, but enumerate gave ${emitted.map { it.name }}",
         )
     }
 
@@ -110,15 +139,43 @@ abstract class ProviderContractTest {
 
         val emitted = provider.enumerate(account(provider), selectionOf(provider, photos)).toList()
         val positions = emitted.withIndex().associate { (index, obj) -> obj.id to index }
+        val roots = setOf(photos)
 
+        // Asserted as a property of *every* object rather than of the ones that
+        // happen to carry a parent. The earlier version skipped an object whose
+        // `parentId` was null, which made it silently vacuous for an adapter
+        // that set no parents at all — precisely the adapter that was broken.
         emitted.forEach { obj ->
-            val parent = obj.parentId ?: return@forEach
-            val parentPosition = positions[parent] ?: return@forEach
+            if (obj.id in roots) return@forEach
+            val parent = assertNotNull(
+                obj.parentId,
+                "${obj.name} was emitted with no parent; only a selection root may have none",
+            )
+            val parentPosition = assertNotNull(
+                positions[parent],
+                "${obj.name} names a parent that enumerate never emitted",
+            )
             assertTrue(
                 parentPosition < positions.getValue(obj.id),
                 "${obj.name} was emitted before its parent",
             )
         }
+    }
+
+    @Test
+    fun `enumerate accepts a file as a selection root`() = runTest {
+        val provider = newProvider()
+        val file = seedFile(provider, rootFolder(provider), "alone.txt", byteArrayOf(1))
+
+        // §9 puts a checkbox on every row, files included, so a selection root
+        // is not necessarily a folder. An adapter that assumes otherwise asks
+        // the provider to list a file and gets a shaped refusal back.
+        val emitted = provider.enumerate(
+            account(provider),
+            selectionOf(provider, file, type = CloudObjectType.FILE),
+        ).toList()
+
+        assertEquals(listOf(file), emitted.map { it.id })
     }
 
     @Test
@@ -140,6 +197,16 @@ abstract class ProviderContractTest {
         repeat(5) { seedFile(provider, parent, "file-$it.bin", byteArrayOf(it.toByte())) }
 
         val all = provider.enumerate(account(provider), selectionOf(provider, parent)).toList()
+
+        // Established before it is sliced: `all.drop(3)` is the empty list for
+        // any walk of three objects or fewer, and an adapter that resumed into
+        // nothing would then match it exactly.
+        assertEquals(
+            6,
+            all.size,
+            "expected the selected folder and its five files, got ${all.map { it.name }}",
+        )
+
         val resumed = provider.enumerate(
             account(provider),
             selectionOf(provider, parent),
@@ -193,13 +260,22 @@ abstract class ProviderContractTest {
     @Test
     fun `quota is either absent or internally consistent`() = runTest {
         val provider = newProvider()
+        // Absent is a legitimate answer: §20.7 would rather report no quota
+        // than a wrong one, and a team allocation is shaped differently enough
+        // that the Dropbox adapter declines to guess at it.
         val quota = provider.quota(account(provider)) ?: return@runTest
-        val total = quota.totalBytes
-        val used = quota.usedBytes
-        val available = quota.availableBytes
-        if (total != null && used != null && available != null) {
-            assertEquals(total - used, available, "quota fields must agree")
-        }
+
+        // A quota that is present, though, is not allowed to be half-present.
+        // This used to read `if (total != null && used != null && available !=
+        // null)`, which meant an adapter that filled in none of the three
+        // passed the check by having nothing to compare — the same shape as
+        // the parent assertion that hid the enumeration bug. §20.7 refuses a
+        // transfer on these numbers, so a partial answer is worse than none.
+        val total = assertNotNull(quota.totalBytes, "a quota that is reported must say how large it is")
+        val used = assertNotNull(quota.usedBytes, "a quota that is reported must say how much is used")
+        val available = assertNotNull(quota.availableBytes, "a quota that is reported must say what is free")
+
+        assertEquals(total - used, available, "quota fields must agree")
     }
 
     @Test
@@ -354,12 +430,16 @@ abstract class ProviderContractTest {
 
     // ------------------------------------------------------------------ helpers
 
-    protected fun selectionOf(provider: CloudProvider, vararg roots: CloudObjectId): CloudSelection {
+    protected fun selectionOf(
+        provider: CloudProvider,
+        vararg roots: CloudObjectId,
+        type: CloudObjectType = CloudObjectType.FOLDER,
+    ): CloudSelection {
         val objects = roots.map { id ->
             CloudObject(
                 id = id,
                 name = id.opaqueId,
-                type = CloudObjectType.FOLDER,
+                type = type,
                 parentId = null,
                 size = null,
                 modifiedAt = null,

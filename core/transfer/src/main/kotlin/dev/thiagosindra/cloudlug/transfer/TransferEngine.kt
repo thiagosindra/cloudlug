@@ -95,19 +95,53 @@ class TransferEngine(
         val source = providers.provider(transfer.sourceProvider)
         val destination = providers.provider(transfer.destinationProvider)
 
-        val summary = ManifestBuilder(repository, clock).build(
-            transfer = transfer,
-            source = source,
-            destinationCapabilities = destination.capabilities,
-            selection = selection,
-            resumeAfter = resumeAfter,
+        try {
+            val summary = ManifestBuilder(repository, clock).build(
+                transfer = transfer,
+                source = source,
+                destinationCapabilities = destination.capabilities,
+                selection = selection,
+                resumeAfter = resumeAfter,
+            )
+
+            transfer = repository.findTransfer(transferId) ?: error("No transfer $transferId")
+            checkDestinationQuota(transfer, destination)
+
+            repository.transitionTransfer(transferId, TransferStatus.READY)
+            return summary
+        } catch (cancellation: CancellationException) {
+            // Cancelling the coroutine is not the transfer failing; the row
+            // stays in PREPARING and the next attempt resumes it (§12.1).
+            throw cancellation
+        } catch (failure: Throwable) {
+            recordFailedPreparation(transferId, failure)
+            throw failure
+        }
+    }
+
+    /**
+     * Moves a preparation that threw out of PREPARING (spec §13.1).
+     *
+     * The first line of [prepare] puts the transfer in PREPARING, and until now
+     * nothing but success took it out again. Anything that threw in between —
+     * an adapter refusal, a provider 409 — left a row that says "Preparing"
+     * with no manifest and no process working on it, which §24.1 then shows
+     * forever with nothing the user can do to it. A state nobody can leave is
+     * worse than a failure, because a failure at least says what happened.
+     */
+    private suspend fun recordFailedPreparation(transferId: TransferId, failure: Throwable) {
+        // checkDestinationQuota fails the row itself, to say *which* limit was
+        // hit, and §13.1 has no FAILED -> FAILED. Re-reading is how this stays
+        // out of the way of any step that already reported something better.
+        val current = repository.findTransfer(transferId) ?: return
+        if (current.status != TransferStatus.PREPARING) return
+
+        repository.transitionTransfer(
+            transferId,
+            TransferStatus.FAILED,
+            errorCode = (failure as? CloudException)?.code ?: "preparation_failed",
+            errorMessage = failure.message,
         )
-
-        transfer = repository.findTransfer(transferId) ?: error("No transfer $transferId")
-        checkDestinationQuota(transfer, destination)
-
-        repository.transitionTransfer(transferId, TransferStatus.READY)
-        return summary
     }
 
     /** Spec §20.7: refuse before starting rather than failing mid-transfer. */

@@ -57,6 +57,28 @@ class TransferRepositoryTest {
     }
 
     @Test
+    fun `discarding a transfer leaves none of it behind`() = runTest {
+        val id = seedTransfer()
+        repository.transitionTransfer(id, TransferStatus.PREPARING)
+        repository.appendManifestItems(
+            id,
+            listOf(
+                TestFixtures.item("i1", sourceObjectId = "src-a", size = 10),
+                TestFixtures.item("i2", sourceObjectId = "src-b", size = 20),
+            ),
+        )
+
+        repository.discardTransfer(id)
+
+        // The wizard has to create a transfer before §11's manifest has
+        // anywhere to go, so a preparation that fails leaves a row nobody asked
+        // for. §24.2 step 5 wants an abandoned review to leave nothing behind,
+        // and the items have to go with it or the next query finds orphans.
+        assertNull(repository.findTransfer(id))
+        assertEquals(emptyList(), repository.listItems(id))
+    }
+
+    @Test
     fun `a transfer from an account to itself is rejected by the domain model`() {
         // §2.2 as amended: the pair must be two different accounts. This one is
         // a copy of a tree into its own subtree, which §2.3 cannot express and

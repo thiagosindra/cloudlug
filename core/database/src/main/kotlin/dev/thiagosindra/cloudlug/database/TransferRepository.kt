@@ -388,6 +388,27 @@ class TransferRepository(
         database.chunks.deleteByTransfer(transferId)
     }
 
+    /**
+     * Removes a transfer and everything hanging off it, leaving no trace.
+     *
+     * This is for a transfer that was never the user's: the wizard has to
+     * create the row before §11's manifest has anywhere to go, so a preparation
+     * that fails leaves behind something nobody asked for and nobody confirmed.
+     * §24.2 step 5 says abandoning a review leaves nothing behind, and a review
+     * the user never reached is abandoned in the strongest sense.
+     *
+     * It is deliberately *not* how a transfer the user started goes away —
+     * that is CANCELLED, which is a state with history, and §13.1 keeps it.
+     */
+    suspend fun discardTransfer(transferId: TransferId) = database.withTransaction {
+        // Chunks before items before the transfer: each references the one
+        // after it, and the cache rows are the only ones with bytes on disk
+        // behind them (spec §22.3).
+        database.chunks.deleteByTransfer(transferId)
+        database.items.deleteByTransfer(transferId)
+        database.transfers.delete(transferId)
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private suspend fun updateItem(
