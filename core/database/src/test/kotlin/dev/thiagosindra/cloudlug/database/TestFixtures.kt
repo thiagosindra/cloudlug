@@ -23,14 +23,16 @@ object TestFixtures {
         id: String = "t1",
         source: ProviderType = ProviderType.DROPBOX,
         destination: ProviderType = ProviderType.GOOGLE_DRIVE,
+        sourceAccount: String = "source-account",
+        destinationAccount: String = "destination-account",
     ) = TransferEntity(
         id = TransferId(id),
         createdAt = EPOCH,
         updatedAt = EPOCH,
         sourceProvider = source,
-        sourceAccountId = AccountId("source-account"),
+        sourceAccountId = AccountId(sourceAccount),
         destinationProvider = destination,
-        destinationAccountId = AccountId("destination-account"),
+        destinationAccountId = AccountId(destinationAccount),
         destinationRootId = "destination-root",
         destinationContainerName = "CloudLug - 2026-09-17 09-57",
     )

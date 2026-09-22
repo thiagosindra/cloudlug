@@ -57,10 +57,34 @@ class TransferRepositoryTest {
     }
 
     @Test
-    fun `same-provider transfers are rejected by the domain model`() {
+    fun `a transfer from an account to itself is rejected by the domain model`() {
+        // §2.2 as amended: the pair must be two different accounts. This one is
+        // a copy of a tree into its own subtree, which §2.3 cannot express and
+        // which can recurse.
         assertFailsWith<IllegalArgumentException> {
-            TestFixtures.transfer(source = ProviderType.DROPBOX, destination = ProviderType.DROPBOX)
+            TestFixtures.transfer(
+                source = ProviderType.DROPBOX,
+                destination = ProviderType.DROPBOX,
+                sourceAccount = "the-same-account",
+                destinationAccount = "the-same-account",
+            )
         }
+    }
+
+    @Test
+    fun `two accounts at the same provider are a legal pair`() {
+        // What v0.4 exists to allow, and what the old provider-comparison rule
+        // forbade: Dropbox to Dropbox between two accounts one person owns.
+        // Until Drive lands this is the only transfer CloudLug can perform.
+        val transfer = TestFixtures.transfer(
+            source = ProviderType.DROPBOX,
+            destination = ProviderType.DROPBOX,
+            sourceAccount = "dbid:AAA",
+            destinationAccount = "dbid:BBB",
+        )
+
+        assertEquals(transfer.sourceProvider, transfer.destinationProvider)
+        assertTrue(transfer.sourceAccountId != transfer.destinationAccountId)
     }
 
     @Test

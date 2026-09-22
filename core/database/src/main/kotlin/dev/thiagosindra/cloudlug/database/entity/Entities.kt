@@ -79,8 +79,20 @@ data class TransferEntity(
     val lastErrorMessage: String? = null,
 ) {
     init {
-        require(sourceProvider != destinationProvider) {
-            "Same-provider transfers are prohibited by the transfer domain (spec §2.2)"
+        // §2.2 as amended for v0.4: the pair must be two different *accounts*.
+        //
+        // The prohibition is aimed at a transfer from an account into itself —
+        // a copy of a tree into its own subtree, which §2.3's "copy, never
+        // synchronize" cannot express and which can recurse. Comparing
+        // providers was a proxy for that, correct only while a provider had
+        // one account. It also forbade Dropbox -> Dropbox between two accounts
+        // the same person owns, which is legitimate and, until Drive lands, is
+        // the only transfer CloudLug can perform at all.
+        //
+        // Still in the transfer domain rather than in an adapter: it is a
+        // property of the pair, and no single adapter sees both halves.
+        require(sourceAccountId != destinationAccountId) {
+            "A transfer's source and destination must be different accounts (spec §2.2)"
         }
     }
 
