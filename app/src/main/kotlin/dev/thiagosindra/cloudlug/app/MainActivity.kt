@@ -15,7 +15,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import dev.thiagosindra.cloudlug.BuildConfig
+import dev.thiagosindra.cloudlug.app.di.DemoAccounts
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 import dev.thiagosindra.cloudlug.feature.accounts.AccountsScreen
 import dev.thiagosindra.cloudlug.feature.home.HomeScreen
 import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
@@ -26,9 +31,27 @@ import dev.thiagosindra.cloudlug.ui.CloudLugTheme
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var demoAccounts: DemoAccounts
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // §24.2 picks accounts now, so the demo provider needs a row in §12.4
+        // to be pickable at all. Debug builds only, never a credential — see
+        // DemoAccounts.
+        //
+        // Here rather than in Application.onCreate, which runs once per
+        // process: the instrumented tests share one, so a test that
+        // disconnects a demo account left the next one without it. Seeding per
+        // launch makes them order-independent, and makes the demo rows behave
+        // like what they are — a fixture the debug build always has, rather
+        // than state a disconnect can permanently remove.
+        if (BuildConfig.DEBUG) {
+            lifecycleScope.launch { demoAccounts.seed() }
+        }
         // Read once, before composing: consuming clears the file, so a crash
         // is shown on the next launch and not the one after that.
         val pendingCrash = crashReporter(this).consumePendingReport()

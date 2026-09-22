@@ -24,6 +24,12 @@ import javax.inject.Singleton
  * Seeded rather than faked at read time because the wizard, the accounts
  * screen and the engine should all see one source of truth. A special case in
  * any one of them would be a lie the other two could disagree with.
+ *
+ * Seeded on every launch rather than once per process, so a disconnect does
+ * not remove them for good. That is what a fixture should do — and it is also
+ * what keeps the instrumented tests independent of each other: they share one
+ * process, and a test that disconnects a demo account was leaving the next one
+ * without a destination to pick.
  */
 @Singleton
 class DemoAccounts @Inject constructor(
@@ -31,10 +37,7 @@ class DemoAccounts @Inject constructor(
     private val clock: Clock,
 ) {
 
-    /**
-     * Idempotent: `upsert` by a fixed id, so a relaunch does not accumulate
-     * rows and a disconnect stays disconnected until the next cold start.
-     */
+    /** Idempotent: `upsert` by a fixed id, so relaunching accumulates nothing. */
     suspend fun seed() {
         demo.forEach { database.accounts.upsert(it) }
     }

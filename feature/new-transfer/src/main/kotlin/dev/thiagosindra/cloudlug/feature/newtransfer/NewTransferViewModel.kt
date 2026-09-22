@@ -10,7 +10,6 @@ import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
 import dev.thiagosindra.cloudlug.auth.AccountRepository
 import dev.thiagosindra.cloudlug.model.AccountId
-import dev.thiagosindra.cloudlug.provider.AccountRoles
 import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
@@ -125,7 +124,7 @@ class NewTransferViewModel @Inject constructor(
             accounts.observe().collect { connected ->
                 _state.update { state ->
                     state.copy(
-                        accounts = connected.map { ConnectedAccount(it, accounts.rolesFor(it) ?: NO_ROLES) },
+                        accounts = connected.map { ConnectedAccount(it, accounts.rolesFor(it)) },
                         source = state.source?.takeIf { id -> connected.any { it.id == id } },
                         destination = state.destination?.takeIf { id -> connected.any { it.id == id } },
                     )
@@ -291,17 +290,5 @@ class NewTransferViewModel @Inject constructor(
             val provider = _state.value.providerOf(account)?.let(::providerLabel) ?: "that account"
             failure.message ?: "Could not list the contents of $provider"
         }
-    }
-
-    private companion object {
-        /**
-         * What an account whose provider has no connector can do: nothing.
-         *
-         * Only reachable for a provider this build cannot connect, which
-         * therefore has no account either — but assuming a role would put a
-         * choice in front of the user that cannot work, and §7 is explicit
-         * that the grant decides.
-         */
-        val NO_ROLES = AccountRoles(canBeSource = false, canBeDestination = false)
     }
 }
