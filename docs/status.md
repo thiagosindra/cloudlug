@@ -1,4 +1,4 @@
-# Status — v0.3.1 (the OAuth redirect fix)
+# Status — v0.3.2 (main-safe provider calls)
 
 What exists, what is compiled, what is verified — and, for the first time in
 this project, what has been verified **against a real cloud account** rather
@@ -165,6 +165,38 @@ logic, while whether AppAuth can find a browser is not — and that needs a seam
 (for §24.5's "this will stop N transfers" count) which cannot be stood in for.
 Worth a narrow dependency there, not worth widening a fix PR for. **v0.4.**
 
+**Verified on a real device, and it failed again — one step further along.**
+v0.3.1 fixed the redirect crash, and the next attempt got past it and died on
+the token exchange:
+
+    android.os.NetworkOnMainThreadException
+      at okhttp3.internal.connection.RealCall.execute
+      at ...DropboxTokenClient.post
+      at ...AccountsViewModel$onAuthorizationResult$1
+
+Not a bug in the exchange. `suspend` does not move work off a thread — it runs
+on whatever dispatcher the caller is already on — and every blocking
+`execute()` in `:providers:dropbox` relied on its caller to pick one. Until
+v0.3 the only caller was the transfer engine, whose scope is `Dispatchers.IO`,
+so the adapter was **accidentally correct for the one caller it had**. The
+accounts screen called it from `viewModelScope`, which is `Dispatchers.Main`.
+
+Five blocking calls had this shape, not one. The fix is in the two HTTP
+classes rather than at the call site: a `suspend` function that blocks is
+lying about its contract, and fixing the caller would have left the same trap
+for the next one.
+
+**Verified by JVM test.** `MainSafetyTest` runs each entry point on a thread
+it owns and asserts the HTTP call did not happen on that thread — the property
+rather than the path, so a future method that blocks without switching fails
+there instead of on a phone. Reverting the fix fails it; that was checked
+rather than assumed.
+
+Worth recording how nearly this test was useless: kotlinx.coroutines decorates
+thread names with ` @coroutine#N` under test, so comparing the decorated name
+against the bare one passed whether or not the call had blocked. A sanity
+assertion on the line above it is the only reason that surfaced.
+
 **Still not verified.** No test asserts that anything *renders correctly* —
 that text is legible, that nothing is clipped, that the §24.3 hop indicator
 reads as intended. The journey tests prove the flows are reachable and that the
@@ -303,20 +335,26 @@ counter (§11).
    call without one, and the grant already carries `account_id` in its token
    response, so it need not be invented. **v0.4**, because Google Drive wants
    exactly the same change and doing it twice would be the waste.
-8. **The sign-in has never completed end to end anywhere.** The outward leg
+8. **Nothing enforces main-safety anywhere else.** `MainSafetyTest` covers
+   `:providers:dropbox`, which is where the blocking is today. Google Drive's
+   adapter will have the same shape and nothing would catch a repeat except
+   another hand-written test per module. A shared test fixture, the way §31.2's
+   contract suite is shared, would make it structural. **v0.4**, alongside the
+   Drive adapter that will need it.
+9. **The sign-in has never completed end to end anywhere.** The outward leg
    (consent screen, real PKCE) ran on a phone; the return leg now runs in CI;
    the token exchange runs against MockWebServer and, for the refresh half,
    against real Dropbox. What has not happened in one unbroken run is browser →
    redirect → exchange → account row. v0.3.1 fixed the crash in the middle of
    that chain, which means the next attempt on a device is the first one that
    can get through.
-9. **Nothing retries a refresh that fails transiently.** An `AUTH_REQUIRED`
+10. **Nothing retries a refresh that fails transiently.** An `AUTH_REQUIRED`
    correctly stops and asks the user to reconnect, but a refresh that fails
    because the network dropped surfaces to the transfer as an auth error rather
    than as §23's transient case.
-10. **No Google Drive.** `:providers:google-drive` is still a stub carrying TODOs
+11. **No Google Drive.** `:providers:google-drive` is still a stub carrying TODOs
    naming the spec sections it must satisfy. v0.4.
-11. **No Play assets.** §29 — v0.5.
+12. **No Play assets.** §29 — v0.5.
 
 ## What v0.3 needed from you, and what came of it
 

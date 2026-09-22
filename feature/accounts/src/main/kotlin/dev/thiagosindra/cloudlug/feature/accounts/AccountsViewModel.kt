@@ -15,6 +15,7 @@ import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
 import dev.thiagosindra.cloudlug.ui.providerLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
@@ -133,17 +135,29 @@ class AccountsViewModel @Inject constructor(
      * user can be told about.
      */
     fun requestConnect(provider: ProviderType) {
-        local.value = try {
-            local.value.copy(
-                launch = AuthorizationLaunch(launches.incrementAndGet(), provider, accounts.authorizationIntent(provider)),
-                message = null,
-            )
-        } catch (noBrowser: NoBrowserAvailableException) {
-            local.value.copy(
-                launch = null,
-                message = "CloudLug signs in through your browser so it never sees your password. " +
-                    "This device has no browser installed, so ${providerLabel(provider)} can't be connected here.",
-            )
+        viewModelScope.launch {
+            local.value = try {
+                // Off the main thread: building this queries the package
+                // manager for a browser, writes the pending verifier to §8.3's
+                // store and does Keystore crypto to get it there. None of that
+                // belongs in a click handler, even though none of it is fatal
+                // the way the token exchange on this path was.
+                //
+                // Only the blocking part moves. The state write stays on the
+                // dispatcher viewModelScope gives it, so the read-modify-write
+                // below cannot interleave with another action's.
+                val intent = withContext(Dispatchers.IO) { accounts.authorizationIntent(provider) }
+                local.value.copy(
+                    launch = AuthorizationLaunch(launches.incrementAndGet(), provider, intent),
+                    message = null,
+                )
+            } catch (noBrowser: NoBrowserAvailableException) {
+                local.value.copy(
+                    launch = null,
+                    message = "CloudLug signs in through your browser so it never sees your password. " +
+                        "This device has no browser installed, so ${providerLabel(provider)} can't be connected here.",
+                )
+            }
         }
     }
 

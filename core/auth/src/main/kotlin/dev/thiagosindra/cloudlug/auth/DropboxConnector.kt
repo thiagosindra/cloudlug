@@ -14,6 +14,9 @@ import dev.thiagosindra.cloudlug.provider.CloudProvider
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxOAuth
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxTokenClient
 import dev.thiagosindra.cloudlug.provider.dropbox.StoredDropboxTokenSource
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
 import net.openid.appauth.AuthorizationResponse
@@ -45,6 +48,7 @@ class DropboxConnector(
     private val pending: PendingAuthorization,
     private val tokenClient: DropboxTokenClient,
     private val random: SecureRandom = SecureRandom(),
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : AccountConnector {
 
     override val provider: ProviderType get() = ProviderType.DROPBOX
@@ -88,7 +92,15 @@ class DropboxConnector(
         return intent
     }
 
-    override suspend fun complete(result: Intent?): CloudAccount {
+    /**
+     * Moved off the caller's thread wholesale.
+     *
+     * The network calls below are main-safe on their own now, but this also
+     * reads and writes §8.3's Keystore-backed store, which is disk plus
+     * crypto. The caller is a click handler's coroutine on `Dispatchers.Main`,
+     * and none of this belongs there.
+     */
+    override suspend fun complete(result: Intent?): CloudAccount = withContext(io) {
         if (result == null) {
             pending.discard()
             throw AuthorizationCancelledException()
@@ -143,10 +155,10 @@ class DropboxConnector(
         }
 
         tokens.adopt(grant)
-        return dropbox.authenticate()
+        dropbox.authenticate()
     }
 
-    override suspend fun disconnect(account: AccountId) {
+    override suspend fun disconnect(account: AccountId) = withContext(io) {
         // Revoke first (§8.3): if this fails, the credential is still here and
         // the user can try again. Clearing it first would strand a live grant
         // on their Dropbox account with nothing left that could revoke it.
