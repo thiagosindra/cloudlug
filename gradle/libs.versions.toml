@@ -38,6 +38,10 @@ activityCompose = "1.12.0"
 navigationCompose = "2.9.5"
 lifecycle = "2.9.1"
 coreKtx = "1.16.0"
+# Only AppAuth needs this. Its redirect receiver is an AppCompatActivity, so
+# that one activity must run under a Theme.AppCompat descendant; nothing else
+# in CloudLug is an AppCompat view (§3 is Compose throughout).
+appcompat = "1.7.1"
 androidxTest = "1.6.2"
 androidxTestCore = "1.6.1"
 androidxTestJunit = "1.2.1"
@@ -62,6 +66,7 @@ hilt-compiler = { module = "com.google.dagger:hilt-android-compiler", version.re
 hilt-navigation-compose = { module = "androidx.hilt:hilt-navigation-compose", version.ref = "hiltNavigation" }
 
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }

@@ -1,4 +1,4 @@
-# Status — v0.3 (the Dropbox adapter)
+# Status — v0.3.1 (the OAuth redirect fix)
 
 What exists, what is compiled, what is verified — and, for the first time in
 this project, what has been verified **against a real cloud account** rather
@@ -123,11 +123,39 @@ connectable, Google Drive named as not yet supported rather than given a button
 that cannot work, and the demo provider absent, since it has no account to
 connect. It stops where a real sign-in would begin.
 
+**Verified on a real device, and it failed.** v0.3 was green on all three CI
+jobs and crashed on a Samsung phone running Android 16 the instant the Dropbox
+consent screen handed control back:
+
+    java.lang.IllegalStateException: You need to use a Theme.AppCompat theme
+    (or descendant) with this activity.
+      at net.openid.appauth.RedirectUriReceiverActivity.onCreate
+
+AppAuth's redirect receiver is an `AppCompatActivity` and inherited
+`Theme.CloudLug`, which descends from the platform's Material theme. The crash
+was in `onCreate`, before the redirect was read — so nothing about the code
+that *handles* a redirect was wrong, and no amount of testing that code would
+have found it. Only starting the activity does, and nothing ever had.
+
+That is the v0.2 lesson for the second time: `FirstRunSmokeTest` proved the app
+starts, the journey test proved a transfer runs, `AccountsScreenTest` proved the
+accounts screen draws — and the one step none of them took was the one that
+broke. The debug crash reporter earned its keep again.
+
+**Verified on an emulator, in CI.** `OAuthRedirectTest` now delivers the
+redirect straight to AppAuth's receiver, as the browser would, and asserts the
+activity starts and leaves the app standing — once with a pending attempt and
+once with none. Driving a real browser in CI is not possible and a person's
+password does not belong in an emulator, but the leg that crashed is now
+covered.
+
 **Still not verified.** No test asserts that anything *renders correctly* —
 that text is legible, that nothing is clipped, that the §24.3 hop indicator
 reads as intended. The journey tests prove the flows are reachable and that the
-engine runs inside the app, not that the result looks right. Nobody has
-completed a real Dropbox sign-in in the app.
+engine runs inside the app, not that the result looks right. And no test has
+carried a redirect all the way through a real token exchange to a connected
+account row: the receiver is covered, the exchange behind it is covered against
+MockWebServer, and the join between them has still only ever run on a phone.
 
 ## Real Dropbox, or only the fake?
 
@@ -169,9 +197,11 @@ share.
 - **Recovery after process death with a real account.** §31.4's scenarios run
   against the fake only.
 - **The §24.5 screen with a connected account.** The emulator test covers the
-  screen up to the point where a Custom Tab would open; a real sign-in needs a
-  browser and someone's password, which do not belong in CI. Nobody has yet
-  connected Dropbox in the app and watched the row fill in.
+  screen up to the point where a Custom Tab would open, and `OAuthRedirectTest`
+  covers the return trip from the point the browser would hand it back — but
+  the browser itself, and therefore a completed sign-in, has run only on a
+  phone. Nobody has yet watched the row fill in with a name and four scope
+  chips.
 - **A transfer that actually moves bytes between two real accounts.** This has
   never happened. It cannot until v0.4 gives Dropbox somewhere to send them, or
   until a second Dropbox account is connected — which the adapter cannot do yet
@@ -257,13 +287,20 @@ counter (§11).
    call without one, and the grant already carries `account_id` in its token
    response, so it need not be invented. **v0.4**, because Google Drive wants
    exactly the same change and doing it twice would be the waste.
-8. **Nothing retries a refresh that fails transiently.** An `AUTH_REQUIRED`
+8. **The sign-in has never completed end to end anywhere.** The outward leg
+   (consent screen, real PKCE) ran on a phone; the return leg now runs in CI;
+   the token exchange runs against MockWebServer and, for the refresh half,
+   against real Dropbox. What has not happened in one unbroken run is browser →
+   redirect → exchange → account row. v0.3.1 fixed the crash in the middle of
+   that chain, which means the next attempt on a device is the first one that
+   can get through.
+9. **Nothing retries a refresh that fails transiently.** An `AUTH_REQUIRED`
    correctly stops and asks the user to reconnect, but a refresh that fails
    because the network dropped surfaces to the transfer as an auth error rather
    than as §23's transient case.
-9. **No Google Drive.** `:providers:google-drive` is still a stub carrying TODOs
+10. **No Google Drive.** `:providers:google-drive` is still a stub carrying TODOs
    naming the spec sections it must satisfy. v0.4.
-10. **No Play assets.** §29 — v0.5.
+11. **No Play assets.** §29 — v0.5.
 
 ## What v0.3 needed from you, and what came of it
 
@@ -310,12 +347,12 @@ is ready for them.
 
 Useful but not blocking:
 
-- **Connect Dropbox in the app and tell me what you see.** Nobody has done this
-  yet. The emulator test covers §24.5 up to the point where the Custom Tab
-  opens; the tab itself, the consent screen, the return trip and the row
-  filling in with your name and scopes have been exercised by no one. This is
-  the v0.2 crash-report lesson again: the one thing tests structurally cannot
-  do is be a person holding a phone.
+- **Try connecting Dropbox again on the v0.3.1 build.** The first attempt got
+  through the consent screen and crashed on the way back; that crash is fixed
+  and its leg is now covered in CI, but the full chain — tab, consent, redirect,
+  exchange, row filling in with your name and four scope chips — has still never
+  completed in one run. The v0.2 lesson holds twice over now: the one thing
+  tests structurally cannot do is be a person holding a phone.
 - A **test Dropbox account with awkward data**: deep trees, many small files, a
   file over 4 GiB, names with trailing dots and non-ASCII characters. The live
   suite currently uses small fixtures, so the §20.4 name rules and the chunked

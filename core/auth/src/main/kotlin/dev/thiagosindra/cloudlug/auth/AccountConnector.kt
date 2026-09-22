@@ -63,3 +63,14 @@ interface AccountConnector {
 
 /** The user backed out of the consent page. Not a failure (§24). */
 class AuthorizationCancelledException : Exception("the sign-in was cancelled")
+
+/**
+ * There is no browser on this device, so §8.1's Custom Tab cannot open.
+ *
+ * Rare but real: a managed or stripped-down device can ship without one, and
+ * so can an emulator running an AOSP image. §8.1 requires a browser rather
+ * than a WebView precisely so this app never sees the user's password, which
+ * means a missing browser is a dead end — but it is a dead end the user can be
+ * told about, not a crash.
+ */
+class NoBrowserAvailableException : Exception("no browser is available to sign in with")

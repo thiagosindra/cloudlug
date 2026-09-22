@@ -1,4 +1,36 @@
 <resources>
     <!-- Compose supplies the real theme; this is the pre-Compose window theme. -->
     <style name="Theme.CloudLug" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!--
+      The theme for AppAuth's redirect receiver, and nothing else.
+
+      That activity is an AppCompatActivity, and AppCompatDelegate throws in
+      onCreate under any theme that is not a Theme.AppCompat descendant:
+
+        You need to use a Theme.AppCompat theme (or descendant) with this
+        activity.
+
+      Theme.CloudLug descends from android:Theme.Material, which is a platform
+      theme, so returning from the Dropbox consent screen crashed the app before
+      the redirect was even read (v0.3, on a real device).
+
+      Scoped to that one activity rather than fixed by re-parenting
+      Theme.CloudLug: CloudLug is Compose throughout (§3) and has no AppCompat
+      views, so giving the whole app an AppCompat theme would be a much larger
+      change to satisfy one bounce activity.
+
+      Transparent and animation-free because the activity is not meant to be
+      seen: it exists only to hand the redirect on to AppAuth and finish. A
+      visible frame here would read as a flash of blank app between the browser
+      and the accounts screen.
+    -->
+    <style name="Theme.CloudLug.OAuthRedirect" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
 </resources>
