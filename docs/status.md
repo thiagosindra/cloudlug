@@ -149,6 +149,22 @@ once with none. Driving a real browser in CI is not possible and a person's
 password does not belong in an emulator, but the leg that crashed is now
 covered.
 
+**Not verified: the no-browser path.** v0.3.1 also fixed a second crash in the
+same leg — `authorizationIntent()` throws `ActivityNotFoundException` when the
+device has no browser, and the screen called it from the button's `onClick`,
+where nothing catches it. The test for it *skips* on the CI emulator, which
+turns out to have something that answers a browsable `https` intent:
+
+    AccountsScreenTest > connecting_without_a_browser_explains_itself_instead_of_crashing SKIPPED
+
+So the message a browser-less device would see is reasoned about, not observed.
+Covering it deterministically means testing the ViewModel rather than the
+device — turning `NoBrowserAvailableException` into a message is CloudLug's
+logic, while whether AppAuth can find a browser is not — and that needs a seam
+`AccountsViewModel` does not have: it takes a concrete `TransferController`
+(for §24.5's "this will stop N transfers" count) which cannot be stood in for.
+Worth a narrow dependency there, not worth widening a fix PR for. **v0.4.**
+
 **Still not verified.** No test asserts that anything *renders correctly* —
 that text is legible, that nothing is clipped, that the §24.3 hop indicator
 reads as intended. The journey tests prove the flows are reachable and that the
