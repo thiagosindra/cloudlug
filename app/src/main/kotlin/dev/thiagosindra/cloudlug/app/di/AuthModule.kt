@@ -72,14 +72,9 @@ object AuthModule {
     ) = StoredDropboxTokenSource(
         tokens = tokenClient,
         store = refreshTokens,
-        // §7's granted scopes, read from the account row on every launch after
-        // the one that created it.
-        scopes = {
-            database.accounts.listAll()
-                .firstOrNull { it.provider == ProviderType.DROPBOX }
-                ?.grantedScopes
-                .orEmpty()
-        },
+        // §7's granted scopes, read from that account's row on every launch
+        // after the one that created it.
+        scopes = { account -> database.accounts.findById(account)?.grantedScopes.orEmpty() },
     )
 
     @Provides

@@ -63,8 +63,19 @@ class DropboxCloudProvider(
      */
     private val acknowledged = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+    /**
+     * §8.1's connect-time call, and the only one with no [AccountId] to take —
+     * discovering one is what it is for.
+     *
+     * The token source knows which account's grant was just adopted, because
+     * Dropbox puts `account_id` in the token response. So the credential is
+     * already filed under the right account before this asks Dropbox who the
+     * user is; this call is here for the display name and address, which the
+     * token response does not carry.
+     */
     override suspend fun authenticate(): CloudAccount {
-        val account = api.rpcWithoutArgument("/2/users/get_current_account")
+        val connected = tokens.accountJustConnected()
+        val account = api.rpcWithoutArgument(connected, "/2/users/get_current_account")
         return CloudAccount(
             id = AccountId(account.stringField("account_id") ?: error("no account_id")),
             provider = type,
@@ -72,19 +83,20 @@ class DropboxCloudProvider(
             displayEmail = account.stringField("email"),
             // §7: what was granted, which is not necessarily what was asked
             // for. Dropbox has no endpoint for it, so it comes from the grant.
-            grantedScopes = tokens.grantedScopes(),
+            grantedScopes = tokens.grantedScopes(connected),
         )
     }
 
     /** §8.3. Revoking invalidates the refresh token too, so the grant is really gone. */
     override suspend fun disconnect(account: AccountId) {
-        api.rpcWithoutArgument("/2/auth/token/revoke")
+api.rpcWithoutArgument(account, "/2/auth/token/revoke")
     }
 
     override fun rootOf(account: AccountId): CloudObjectId = DropboxObjects.idOf(DropboxObjects.ROOT)
 
     override suspend fun resolveMetadata(account: AccountId, objectId: CloudObjectId): CloudObject {
         val entry = api.rpc(
+            account,
             "/2/files/get_metadata",
             buildJsonObject { put("path", DropboxObjects.apiPath(objectId)) },
         )
@@ -93,7 +105,7 @@ class DropboxCloudProvider(
     }
 
     override fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject> =
-        listFolder(parent, recursive = false)
+        listFolder(account, parent, recursive = false)
 
     /**
      * §11's depth-first walk, resumable after process death.
@@ -116,7 +128,7 @@ class DropboxCloudProvider(
         // a full re-walk is safe because §11 deduplicates by source object id.
         var skipping = resumeAfter != null && exists(account, resumeAfter)
         for (root in selection.roots) {
-            listFolder(root.cloudObject.id, recursive = true).collect { entry ->
+            listFolder(account, root.cloudObject.id, recursive = true).collect { entry ->
                 if (skipping) {
                     if (entry.id == resumeAfter) skipping = false
                 } else {
@@ -136,8 +148,9 @@ class DropboxCloudProvider(
      * Emitted per page rather than collected, so a folder with thousands of
      * children starts drawing rows immediately (§5).
      */
-    private fun listFolder(parent: CloudObjectId, recursive: Boolean): Flow<CloudObject> = flow {
+    private fun listFolder(account: AccountId, parent: CloudObjectId, recursive: Boolean): Flow<CloudObject> = flow {
         var page = api.rpc(
+            account,
             "/2/files/list_folder",
             buildJsonObject {
                 put("path", DropboxObjects.apiPath(parent))
@@ -151,12 +164,12 @@ class DropboxCloudProvider(
             }
             if (!page.boolField("has_more")) return@flow
             val cursor = page.stringField("cursor") ?: return@flow
-            page = api.rpc("/2/files/list_folder/continue", buildJsonObject { put("cursor", cursor) })
+            page = api.rpc(account, "/2/files/list_folder/continue", buildJsonObject { put("cursor", cursor) })
         }
     }
 
     override suspend fun quota(account: AccountId): StorageQuota? {
-        val usage = api.rpcWithoutArgument("/2/users/get_space_usage")
+        val usage = api.rpcWithoutArgument(account, "/2/users/get_space_usage")
         val used = usage.longField("used")
         // An individual account has an "individual" allocation; a team member's
         // allocation is shaped differently, and §20.7 would rather report no
@@ -174,6 +187,7 @@ class DropboxCloudProvider(
     ): CloudDownload {
         val effective = range?.takeIf { capabilities.supportsRangeDownload }
         val response = api.content(
+            account,
             "/2/files/download",
             buildJsonObject { put("path", DropboxObjects.apiPath(objectId)) },
             range = effective,
@@ -202,12 +216,13 @@ class DropboxCloudProvider(
 
         for (segment in relativePath.segments) {
             currentPath = "$currentPath/$segment"
-            val existing = runCatching { resolveByPath(currentPath) }.getOrNull()
+            val existing = runCatching { resolveByPath(account, currentPath) }.getOrNull()
             if (existing != null) {
                 current = existing.id
                 continue
             }
             val result = api.rpc(
+                account,
                 "/2/files/create_folder_v2",
                 buildJsonObject { put("path", currentPath) },
             )
@@ -233,17 +248,18 @@ class DropboxCloudProvider(
         name: String,
     ): List<CloudObject> {
         val path = "${DropboxObjects.apiPath(parent)}/$name"
-        return listOfNotNull(runCatching { resolveByPath(path) }.getOrNull())
+        return listOfNotNull(runCatching { resolveByPath(account, path) }.getOrNull())
     }
 
-    private suspend fun resolveByPath(path: String): CloudObject? =
+    private suspend fun resolveByPath(account: AccountId, path: String): CloudObject? =
         DropboxObjects.toCloudObject(
-            api.rpc("/2/files/get_metadata", buildJsonObject { put("path", path) }),
+            api.rpc(account, "/2/files/get_metadata", buildJsonObject { put("path", path) }),
             parent = null,
         )
 
     override suspend fun beginUpload(account: AccountId, request: UploadRequest): UploadSession {
         val started = api.content(
+            account,
             "/2/files/upload_session/start",
             buildJsonObject { put("close", false) },
             payload = ByteArray(0).toRequestBody(null),
@@ -261,6 +277,7 @@ class DropboxCloudProvider(
             "a non-final chunk of ${chunk.length} bytes is not aligned to ${capabilities.uploadChunkAlignment}"
         }
         api.content(
+            session.request.account,
             "/2/files/upload_session/append_v2",
             buildJsonObject {
                 put("cursor", cursorFor(session, chunk.offset))
@@ -287,6 +304,7 @@ class DropboxCloudProvider(
     override suspend fun queryUpload(session: UploadSession): UploadProgress {
         val believed = acknowledged[session.id] ?: session.providerMetadata?.toLongOrNull() ?: 0L
         val (status, body) = api.contentAllowingFailure(
+            session.request.account,
             "/2/files/upload_session/append_v2",
             buildJsonObject {
                 put("cursor", cursorFor(session, believed))
@@ -310,6 +328,7 @@ class DropboxCloudProvider(
     override suspend fun finishUpload(session: UploadSession): CloudObject {
         val request = session.request
         val response = api.content(
+            session.request.account,
             "/2/files/upload_session/finish",
             buildJsonObject {
                 put("cursor", cursorFor(session, acknowledged[session.id] ?: queryUpload(session).acknowledgedBytes))
@@ -343,6 +362,7 @@ class DropboxCloudProvider(
         val believed = acknowledged.remove(session.id) ?: session.providerMetadata?.toLongOrNull() ?: 0L
         runCatching {
             api.content(
+            session.request.account,
                 "/2/files/upload_session/append_v2",
                 buildJsonObject {
                     put("cursor", cursorFor(session, believed))

@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -29,7 +30,7 @@ interface DropboxTokenSource {
      * does not hold the result, which keeps the token out of any object the
      * engine might retain or log.
      */
-    suspend fun accessToken(): String
+    suspend fun accessToken(account: AccountId): String
 
     /**
      * What the user actually granted (§7).
@@ -40,7 +41,17 @@ interface DropboxTokenSource {
      * source, destination or both, so it cannot be assumed to equal what was
      * requested — a user may decline a scope at the consent screen.
      */
-    suspend fun grantedScopes(): Set<String>
+    suspend fun grantedScopes(account: AccountId): Set<String>
+
+    /**
+     * The account whose grant was adopted most recently (§8.1).
+     *
+     * [DropboxCloudProvider.authenticate] is the one call that has no
+     * [AccountId] to pass, because discovering one is what it is for. Dropbox
+     * puts `account_id` in the token response, so the grant already knows the
+     * answer before anybody asks who the user is.
+     */
+    suspend fun accountJustConnected(): AccountId
 }
 
 /**
@@ -80,9 +91,9 @@ internal class DropboxApi(
     private val json = Json { ignoreUnknownKeys = true }
 
     /** A JSON-in, JSON-out route on api.dropboxapi.com. */
-    suspend fun rpc(route: String, arg: JsonObject = buildJsonObject { }): JsonObject = withContext(io) {
+    suspend fun rpc(account: AccountId, route: String, arg: JsonObject = buildJsonObject { }): JsonObject = withContext(io) {
         val body = json.encodeToString(JsonObject.serializer(), arg).toRequestBody(JSON_MEDIA_TYPE)
-        val request = authorized(Request.Builder().url("$API_HOST$route").post(body))
+        val request = authorized(account, Request.Builder().url("$API_HOST$route").post(body))
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw response.toCloudException(text)
@@ -96,8 +107,8 @@ internal class DropboxApi(
      * Dropbox rejects these with a `Content-Type` set, so the body is empty and
      * untyped — an easy thing to get wrong once and then carry everywhere.
      */
-    suspend fun rpcWithoutArgument(route: String): JsonObject = withContext(io) {
-        val request = authorized(Request.Builder().url("$API_HOST$route").post(EMPTY_BODY))
+    suspend fun rpcWithoutArgument(account: AccountId, route: String): JsonObject = withContext(io) {
+        val request = authorized(account, Request.Builder().url("$API_HOST$route").post(EMPTY_BODY))
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) throw response.toCloudException(text)
@@ -113,6 +124,7 @@ internal class DropboxApi(
      * rather than treating it as harmless because it is not a credential.
      */
     suspend fun content(
+        account: AccountId,
         route: String,
         arg: JsonObject,
         payload: RequestBody? = null,
@@ -125,7 +137,7 @@ internal class DropboxApi(
         if (payload != null) builder.header("Content-Type", "application/octet-stream")
         if (range != null) builder.header("Range", "bytes=${range.first}-${range.last}")
 
-        val response = client.newCall(authorized(builder)).execute()
+        val response = client.newCall(authorized(account, builder)).execute()
         if (!response.isSuccessful) {
             val text = response.body?.string().orEmpty()
             response.close()
@@ -146,6 +158,7 @@ internal class DropboxApi(
      * away the one thing being asked for.
      */
     suspend fun contentAllowingFailure(
+        account: AccountId,
         route: String,
         arg: JsonObject,
         payload: RequestBody? = null,
@@ -155,7 +168,7 @@ internal class DropboxApi(
             .header(ARG_HEADER, json.encodeToString(JsonObject.serializer(), arg))
             .post(payload ?: EMPTY_BODY)
         if (payload != null) builder.header("Content-Type", "application/octet-stream")
-        client.newCall(authorized(builder)).execute().use { it.code to it.body?.string().orEmpty() }
+        client.newCall(authorized(account, builder)).execute().use { it.code to it.body?.string().orEmpty() }
     }
 
     /** Maps a status and body through §23, for a caller that read them itself. */
@@ -166,8 +179,8 @@ internal class DropboxApi(
         response.header(RESULT_HEADER)?.let { json.parseToJsonElement(it).jsonObject }
             ?: throw CloudException(CloudErrorKind.PERMANENT, "Dropbox returned no $RESULT_HEADER")
 
-    private suspend fun authorized(builder: Request.Builder): Request =
-        builder.header("Authorization", "Bearer ${tokens.accessToken()}").build()
+    private suspend fun authorized(account: AccountId, builder: Request.Builder): Request =
+        builder.header("Authorization", "Bearer ${tokens.accessToken(account)}").build()
 
     /**
      * §23's mapping, with the provider's own `Retry-After` when it sent one.
