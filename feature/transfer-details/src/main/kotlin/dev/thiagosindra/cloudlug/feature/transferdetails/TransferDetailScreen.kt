@@ -144,6 +144,21 @@ fun TransferDetailScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        // The reason is a category — "error permanent" says an
+                        // item will not succeed on its own, and nothing about
+                        // why. The adapter already wrote a sentence saying
+                        // which call refused and what it said (§23, §26); until
+                        // now it reached the database and stopped there, so a
+                        // failure could only be diagnosed by someone holding
+                        // the source. Two milestones in a row were debugged
+                        // from screenshots that could have carried the answer.
+                        item.lastErrorMessage?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                     }
                 }
             }

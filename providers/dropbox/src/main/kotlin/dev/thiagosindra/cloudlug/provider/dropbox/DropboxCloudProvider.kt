@@ -378,7 +378,11 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
         )
         val entry = response.use { kotlinx.serialization.json.Json.parseToJsonElement(it.body?.string().orEmpty()).jsonObject }
         acknowledged.remove(session.id)
-        return DropboxObjects.toCloudObject(entry, parent = request.parent)
+        // `upload_session/finish` returns a FileMetadata struct, which carries no
+        // `.tag`: the route has only one possible type, so there is no union
+        // member to name. It is a file by construction — this call is what made
+        // it one.
+        return DropboxObjects.toCloudObject(entry, parent = request.parent, assume = CloudObjectType.FILE)
             ?: throw CloudException(CloudErrorKind.PERMANENT, "upload_session/finish returned no file metadata")
     }
 

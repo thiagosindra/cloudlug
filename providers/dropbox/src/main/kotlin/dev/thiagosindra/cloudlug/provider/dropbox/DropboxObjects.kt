@@ -46,14 +46,35 @@ internal object DropboxObjects {
      *
      * Dropbox has no shortcuts and no native documents — both of §20.1 and
      * §20.2's awkward cases are Drive's — so every entry is a file or a folder.
-     * A deleted entry returns null: `list_folder` with `recursive` can include
-     * tombstones, and they are not objects to transfer.
+     * A deleted entry returns null: a listing can include tombstones, and they
+     * are not objects to transfer.
+     *
+     * ### `.tag` is present only where the value is a union member
+     *
+     * `list_folder` and `get_metadata` answer with `Metadata`, a union, so each
+     * value carries `".tag": "file"` saying which member it is.
+     * `upload_session/finish` answers with a `FileMetadata` **struct** — the
+     * route can only return one type, so there is no member to name and no
+     * `.tag` in the body. Same for `create_folder_v2`'s `metadata` and the
+     * `Dropbox-API-Result` header on a download.
+     *
+     * Reading the tag as though it were always there made this return null for
+     * a perfectly good upload response, so every transferred file failed
+     * immediately after its bytes had safely arrived. [assume] is how a caller
+     * that knows which struct it asked for says so; it is consulted only when
+     * there is no tag to read, never to override one.
      */
-    fun toCloudObject(entry: JsonObject, parent: CloudObjectId?): CloudObject? {
-        val tag = entry[".tag"]?.stringOrNull()
-        val type = when (tag) {
+    fun toCloudObject(
+        entry: JsonObject,
+        parent: CloudObjectId?,
+        assume: CloudObjectType? = null,
+    ): CloudObject? {
+        val type = when (entry[".tag"]?.stringOrNull()) {
             "file" -> CloudObjectType.FILE
             "folder" -> CloudObjectType.FOLDER
+            // No tag at all: a struct-returning route. Any other tag is one
+            // this adapter does not transfer, `deleted` above all.
+            null -> assume ?: return null
             else -> return null
         }
 
