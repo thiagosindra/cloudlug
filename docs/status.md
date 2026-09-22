@@ -23,7 +23,9 @@ complete a single transfer.
 
 Milestone definitions are in spec §33; design decisions are in
 [`decisions.md`](decisions.md), where every ADR carries a Status line recording
-whether the spec ratified or overruled it.
+whether the spec ratified or overruled it. Standing rules about how things are
+tested — including the offline-recorded-test rule this milestone produced — are
+in [`testing.md`](testing.md).
 
 Spec is **v1.3**. ADRs 0019–0024 from the v0.2 report were all ratified into it;
 ADRs 0027 and 0028 from this milestone are accepted pending ratification, and

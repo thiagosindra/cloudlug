@@ -94,6 +94,14 @@ abstract class ProviderContractTest {
 
         // A picker that gets a whole subtree cannot draw a folder row, and §9
         // has the user descend one level at a time.
+        //
+        // Anchored on the positive case first: "does not contain `nested`" is
+        // satisfied by an adapter that returns nothing at all, so on its own it
+        // would pass for a picker that shows the user an empty account.
+        assertTrue(
+            children.any { it.id == top },
+            "listChildren must return the level it was asked for: ${children.map { it.name }}",
+        )
         assertTrue(
             children.none { it.id == nested },
             "listChildren must not descend: ${children.map { it.name }}",
@@ -189,6 +197,16 @@ abstract class ProviderContractTest {
         repeat(5) { seedFile(provider, parent, "file-$it.bin", byteArrayOf(it.toByte())) }
 
         val all = provider.enumerate(account(provider), selectionOf(provider, parent)).toList()
+
+        // Established before it is sliced: `all.drop(3)` is the empty list for
+        // any walk of three objects or fewer, and an adapter that resumed into
+        // nothing would then match it exactly.
+        assertEquals(
+            6,
+            all.size,
+            "expected the selected folder and its five files, got ${all.map { it.name }}",
+        )
+
         val resumed = provider.enumerate(
             account(provider),
             selectionOf(provider, parent),
@@ -242,13 +260,22 @@ abstract class ProviderContractTest {
     @Test
     fun `quota is either absent or internally consistent`() = runTest {
         val provider = newProvider()
+        // Absent is a legitimate answer: §20.7 would rather report no quota
+        // than a wrong one, and a team allocation is shaped differently enough
+        // that the Dropbox adapter declines to guess at it.
         val quota = provider.quota(account(provider)) ?: return@runTest
-        val total = quota.totalBytes
-        val used = quota.usedBytes
-        val available = quota.availableBytes
-        if (total != null && used != null && available != null) {
-            assertEquals(total - used, available, "quota fields must agree")
-        }
+
+        // A quota that is present, though, is not allowed to be half-present.
+        // This used to read `if (total != null && used != null && available !=
+        // null)`, which meant an adapter that filled in none of the three
+        // passed the check by having nothing to compare — the same shape as
+        // the parent assertion that hid the enumeration bug. §20.7 refuses a
+        // transfer on these numbers, so a partial answer is worse than none.
+        val total = assertNotNull(quota.totalBytes, "a quota that is reported must say how large it is")
+        val used = assertNotNull(quota.usedBytes, "a quota that is reported must say how much is used")
+        val available = assertNotNull(quota.availableBytes, "a quota that is reported must say what is free")
+
+        assertEquals(total - used, available, "quota fields must agree")
     }
 
     @Test
