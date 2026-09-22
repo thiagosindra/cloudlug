@@ -1,8 +1,9 @@
-# Status — v0.3.2 (main-safe provider calls)
+# Status — v0.3.2 (Dropbox connects)
 
-What exists, what is compiled, what is verified — and, for the first time in
-this project, what has been verified **against a real cloud account** rather
-than against a fake that agrees with us.
+What exists, what is compiled, what is verified — and what has been verified
+**against a real cloud account** rather than against a fake that agrees with
+us. As of 2026-09-22 that includes a Dropbox account connected from the app on
+a real phone: §8.1 end to end, on the third attempt.
 Milestone definitions are in spec §33; design decisions are in
 [`decisions.md`](decisions.md), where every ADR carries a Status line recording
 whether the spec ratified or overruled it.
@@ -244,12 +245,11 @@ share.
   checks the adapter's surface, not a transfer running through it.
 - **Recovery after process death with a real account.** §31.4's scenarios run
   against the fake only.
-- **The §24.5 screen with a connected account.** The emulator test covers the
-  screen up to the point where a Custom Tab would open, and `OAuthRedirectTest`
-  covers the return trip from the point the browser would hand it back — but
-  the browser itself, and therefore a completed sign-in, has run only on a
-  phone. Nobody has yet watched the row fill in with a name and four scope
-  chips.
+- **The browser leg, still.** The emulator test covers §24.5 up to the point
+  where a Custom Tab would open, and `OAuthRedirectTest` covers the return trip
+  from the point the browser hands it back. The tab itself has only ever run on
+  a phone, and cannot run in CI — but it has now run there successfully, which
+  is a different thing from untested (see below).
 - **A transfer that actually moves bytes between two real accounts.** This has
   never happened. It cannot until v0.4 gives Dropbox somewhere to send them, or
   until a second Dropbox account is connected — which the adapter cannot do yet
@@ -341,13 +341,23 @@ counter (§11).
    another hand-written test per module. A shared test fixture, the way §31.2's
    contract suite is shared, would make it structural. **v0.4**, alongside the
    Drive adapter that will need it.
-9. **The sign-in has never completed end to end anywhere.** The outward leg
-   (consent screen, real PKCE) ran on a phone; the return leg now runs in CI;
-   the token exchange runs against MockWebServer and, for the refresh half,
-   against real Dropbox. What has not happened in one unbroken run is browser →
-   redirect → exchange → account row. v0.3.1 fixed the crash in the middle of
-   that chain, which means the next attempt on a device is the first one that
-   can get through.
+9. ~~**The sign-in has never completed end to end anywhere.**~~ Done, on a
+   Samsung phone running Android 16, 2026-09-22. Browser → consent →
+   redirect → token exchange → `get_current_account` → account row, in one
+   unbroken run, on the third attempt. §24.5 showed the account's name and
+   address, "Can be a source or a destination", and the four scopes Dropbox
+   actually granted.
+
+   Three crashes stood between the first attempt and this one, each one step
+   further along and each in a *handoff* rather than inside a component: the
+   redirect receiver's theme (browser → app), the blocking token exchange (UI →
+   adapter), and before those the missing receiver configuration. Every
+   component involved was individually correct and individually tested.
+
+   What this does **not** cover is what happens on the next launch: the
+   accounts screen reads Room, and the credential lives in Keystore. Those are
+   different stores and nothing has yet read the credential back after a
+   process death.
 10. **Nothing retries a refresh that fails transiently.** An `AUTH_REQUIRED`
    correctly stops and asks the user to reconnect, but a refresh that fails
    because the network dropped surfaces to the transfer as an auth error rather
@@ -401,12 +411,13 @@ is ready for them.
 
 Useful but not blocking:
 
-- **Try connecting Dropbox again on the v0.3.1 build.** The first attempt got
-  through the consent screen and crashed on the way back; that crash is fixed
-  and its leg is now covered in CI, but the full chain — tab, consent, redirect,
-  exchange, row filling in with your name and four scope chips — has still never
-  completed in one run. The v0.2 lesson holds twice over now: the one thing
-  tests structurally cannot do is be a person holding a phone.
+- **Force-stop the app and reopen it, with Dropbox connected.** The cheapest
+  remaining check, and it exercises the one §8.3 path nothing has: reading the
+  refresh token back out of Keystore in a new process. If the accounts row is
+  still there and a transfer can start, the credential survived. If the row is
+  there and the transfer fails with `AUTH_REQUIRED`, the credential did not —
+  and that difference is currently invisible on screen, because the row is
+  drawn from Room and the credential is not (see gap 9).
 - A **test Dropbox account with awkward data**: deep trees, many small files, a
   file over 4 GiB, names with trailing dots and non-ASCII characters. The live
   suite currently uses small fixtures, so the §20.4 name rules and the chunked
