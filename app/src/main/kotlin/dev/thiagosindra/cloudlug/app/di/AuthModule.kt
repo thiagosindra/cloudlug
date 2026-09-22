@@ -19,6 +19,7 @@ import dev.thiagosindra.cloudlug.provider.dropbox.DropboxTokenClient
 import dev.thiagosindra.cloudlug.provider.dropbox.StoredDropboxTokenSource
 import dev.thiagosindra.cloudlug.security.KeystoreSecretStore
 import dev.thiagosindra.cloudlug.security.SecretStore
+import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import okhttp3.OkHttpClient
 import javax.inject.Singleton
 
@@ -111,5 +112,6 @@ object AuthModule {
     fun accountRepository(
         database: CloudLugDatabase,
         connectors: Map<ProviderType, @JvmSuppressWildcards AccountConnector>,
-    ) = AccountRepository(database, connectors)
+        providers: ProviderRegistry,
+    ) = AccountRepository(database, connectors, providers)
 }

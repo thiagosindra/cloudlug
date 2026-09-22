@@ -18,12 +18,15 @@ dependencies {
     api(project(":providers:api"))
     implementation(project(":core:model"))
     implementation(project(":core:database"))
+    // §7 falls back to §5's declared capabilities where no connector exists.
+    implementation(project(":core:transfer"))
     implementation(project(":core:security"))
     implementation(project(":providers:dropbox"))
     implementation(libs.okhttp)
     implementation(libs.appauth)
     implementation(libs.kotlinx.coroutines.core)
 
+    testImplementation(project(":providers:fake"))
     testImplementation(kotlin("test"))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)

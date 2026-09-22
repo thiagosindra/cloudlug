@@ -37,16 +37,20 @@ class NewTransferJourneyTest {
         // 1 and 2: the two accounts. §2.2 forbids transferring to the same
         // provider, so the destination list must still offer the other one.
         //
+        // As of v0.4 these really are accounts, not providers: §24.2 offers
+        // the rows in §12.4, which for the demo providers are seeded by
+        // DemoAccounts in debug builds.
+        //
         // The source is the demo provider rather than Dropbox as of v0.3:
         // ProviderType.DROPBOX is the real adapter now and would want a
         // connected account and a network. What this test is for is the engine
         // and the §24 screens end to end, which the fake exercises completely
         // (§31.3) and the network would only make flaky.
         compose.awaitText("1. Choose the source account")
-        compose.node("Demo provider").performClick()
+        compose.node("demo-source@example.invalid").performClick()
 
         compose.awaitText("2. Choose the destination account")
-        compose.node("Google Drive").performClick()
+        compose.node("demo-destination@example.invalid").performClick()
 
         // 3: the step that was empty. The demo tree seeds these three folders,
         // so their absence is the v0.2.1 defect exactly.

@@ -7,6 +7,7 @@ import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.provider.AccountRoles
 import dev.thiagosindra.cloudlug.provider.CloudAccount
+import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.Instant
@@ -22,6 +23,7 @@ import java.time.Instant
 class AccountRepository(
     private val database: CloudLugDatabase,
     private val connectors: Map<ProviderType, AccountConnector>,
+    private val providers: ProviderRegistry,
     private val clock: () -> Instant = Instant::now,
 ) {
 
@@ -44,9 +46,23 @@ class AccountRepository(
      */
     fun canConnect(provider: ProviderType): Boolean = provider in connectors
 
-    /** Null for a provider with no connector; only that provider knows §7's answer. */
-    fun rolesFor(account: CloudAccount): AccountRoles? =
+    /**
+     * §7: what this account may do.
+     *
+     * The connector decides, because interpreting a provider's scope strings
+     * is provider knowledge. Where there is no connector there is also no
+     * grant to interpret — nothing in this build performed the sign-in — so
+     * the answer falls back to what the adapter declares the build can do at
+     * all (§5's `canBeSource`/`canBeDestination`).
+     *
+     * That fallback does not weaken §7 where it matters: a provider CloudLug
+     * can actually sign in to has a connector, and there the grant decides.
+     */
+    fun rolesFor(account: CloudAccount): AccountRoles =
         connectors[account.provider]?.rolesFor(account.grantedScopes)
+            ?: providers.provider(account.provider).capabilities.let {
+                AccountRoles(canBeSource = it.canBeSource, canBeDestination = it.canBeDestination)
+            }
 
     fun authorizationIntent(provider: ProviderType): Intent = connector(provider).authorizationIntent()
 

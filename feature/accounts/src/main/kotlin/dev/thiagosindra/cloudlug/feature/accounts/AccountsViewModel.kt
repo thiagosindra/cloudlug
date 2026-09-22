@@ -27,15 +27,23 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
-/** One provider, connected or not (§24.5). */
+/** One connected account and what §7's granted scopes let it do. */
+data class ConnectedAccount(val account: CloudAccount, val roles: AccountRoles?)
+
+/**
+ * One provider and every account connected to it (§24.5).
+ *
+ * A list rather than one account as of v0.4: two Dropbox accounts are the two
+ * ends of the only transfer CloudLug can currently perform, so the screen has
+ * to be able to show and disconnect them separately.
+ */
 data class AccountRow(
     val provider: ProviderType,
-    val account: CloudAccount?,
-    val roles: AccountRoles?,
-    /** False for a provider this build cannot connect yet (Google Drive until v0.4). */
+    val accounts: List<ConnectedAccount>,
+    /** False for a provider this build cannot connect yet (Google Drive). */
     val connectable: Boolean,
 ) {
-    val connected: Boolean get() = account != null
+    val connected: Boolean get() = accounts.isNotEmpty()
 }
 
 /**
@@ -110,11 +118,11 @@ class AccountsViewModel @Inject constructor(
     val state: StateFlow<AccountsState> = combine(accounts.observe(), local) { connected, local ->
         AccountsState(
             rows = supported.map { provider ->
-                val account = connected.firstOrNull { it.provider == provider }
                 AccountRow(
                     provider = provider,
-                    account = account,
-                    roles = account?.let(accounts::rolesFor),
+                    accounts = connected
+                        .filter { it.provider == provider }
+                        .map { ConnectedAccount(it, accounts.rolesFor(it)) },
                     connectable = accounts.canConnect(provider),
                 )
             },

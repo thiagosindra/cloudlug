@@ -8,6 +8,10 @@ import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferNetworkPolicy
+import dev.thiagosindra.cloudlug.auth.AccountRepository
+import dev.thiagosindra.cloudlug.model.AccountId
+import dev.thiagosindra.cloudlug.provider.AccountRoles
+import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.CloudObject
@@ -17,7 +21,6 @@ import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
 import dev.thiagosindra.cloudlug.ui.providerLabel
 import dev.thiagosindra.cloudlug.transfer.manifest.ManifestSummary
-import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
 import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,11 +35,14 @@ import javax.inject.Inject
 /** The six steps of spec §24.2. */
 enum class WizardStep { SOURCE, DESTINATION, PICK_SOURCE, PICK_DESTINATION, REVIEW, STARTED }
 
+/** A connected account and what §7's granted scopes let it do. */
+data class ConnectedAccount(val account: CloudAccount, val roles: AccountRoles)
+
 data class WizardState(
     val step: WizardStep = WizardStep.SOURCE,
-    val availableProviders: List<ProviderType> = emptyList(),
-    val source: ProviderType? = null,
-    val destination: ProviderType? = null,
+    val accounts: List<ConnectedAccount> = emptyList(),
+    val source: AccountId? = null,
+    val destination: AccountId? = null,
     val sourceChildren: List<CloudObject> = emptyList(),
     val selectedSourceIds: Set<String> = emptySet(),
     val destinationChildren: List<CloudObject> = emptyList(),
@@ -47,6 +53,39 @@ data class WizardState(
     val busy: Boolean = false,
     val error: String? = null,
 ) {
+    /**
+     * §7: an account can be a source only if its grant permits reading.
+     *
+     * The two lists differ because the grants can. An account may appear in
+     * both, one, or neither.
+     */
+    val sourceChoices: List<ConnectedAccount> get() = accounts.filter { it.roles.canBeSource }
+
+    /**
+     * §2.2 as amended: anything but the account already chosen as the source.
+     * Two accounts at one provider are a legal pair; one with itself is not.
+     */
+    val destinationChoices: List<ConnectedAccount>
+        get() = accounts.filter { it.roles.canBeDestination && it.account.id != source }
+
+    /**
+     * "Dropbox (a@example.com) -> Dropbox (b@example.com)", for §24.2's review.
+     *
+     * The provider alone stopped being enough the moment two accounts of one
+     * provider could be the two ends of a transfer.
+     */
+    fun directionLabel(): String {
+        fun name(id: AccountId?): String {
+            val connected = accounts.firstOrNull { it.account.id == id } ?: return "?"
+            val who = connected.account.displayEmail ?: connected.account.displayName
+            return providerLabel(connected.account.provider) + (who?.let { " ($it)" } ?: "")
+        }
+        return "${name(source)} -> ${name(destination)}"
+    }
+
+    fun providerOf(account: AccountId): ProviderType? =
+        accounts.firstOrNull { it.account.id == account }?.account?.provider
+
     val canContinue: Boolean
         get() = when (step) {
             WizardStep.SOURCE -> source != null
@@ -70,35 +109,53 @@ class NewTransferViewModel @Inject constructor(
     private val controller: TransferController,
     private val repository: TransferRepository,
     private val providers: ProviderRegistry,
-    availableProviders: AvailableProviders,
+    private val accounts: AccountRepository,
     private val clock: Clock,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(WizardState(availableProviders = availableProviders.types))
+    private val _state = MutableStateFlow(WizardState())
     val state: StateFlow<WizardState> = _state.asStateFlow()
 
-    fun chooseSource(type: ProviderType) {
+    init {
+        // §24.2 step 1 offers accounts, not providers: with two Dropbox
+        // accounts connected, the provider is no longer the thing being
+        // chosen. The list is observed rather than read once so that
+        // connecting an account from §24.5 and coming back shows it.
+        viewModelScope.launch {
+            accounts.observe().collect { connected ->
+                _state.update { state ->
+                    state.copy(
+                        accounts = connected.map { ConnectedAccount(it, accounts.rolesFor(it) ?: NO_ROLES) },
+                        source = state.source?.takeIf { id -> connected.any { it.id == id } },
+                        destination = state.destination?.takeIf { id -> connected.any { it.id == id } },
+                    )
+                }
+            }
+        }
+    }
+
+    fun chooseSource(account: AccountId) {
         _state.update {
             it.copy(
-                source = type,
+                source = account,
                 // Choosing a source can invalidate an already-picked destination.
-                destination = it.destination?.takeIf { d -> d != type },
+                destination = it.destination?.takeIf { d -> d != account },
                 step = WizardStep.DESTINATION,
             )
         }
     }
 
-    fun chooseDestination(type: ProviderType) {
-        _state.update { it.copy(destination = type, step = WizardStep.PICK_SOURCE) }
+    fun chooseDestination(account: AccountId) {
+        _state.update { it.copy(destination = account, step = WizardStep.PICK_SOURCE) }
         browseSource()
     }
 
     private fun browseSource() = viewModelScope.launch {
-        val type = _state.value.source ?: return@launch
+        val account = _state.value.source ?: return@launch
         _state.update { it.copy(busy = true, error = null) }
-        runCatching { childrenOfRoot(type) }
+        runCatching { childrenOfRoot(account) }
             .onSuccess { children -> _state.update { it.copy(sourceChildren = children, busy = false) } }
-            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(type, failure)) } }
+            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(account, failure)) } }
     }
 
     fun toggleSourceSelection(objectId: String) {
@@ -110,11 +167,11 @@ class NewTransferViewModel @Inject constructor(
     }
 
     fun toDestinationPicker() = viewModelScope.launch {
-        val type = _state.value.destination ?: return@launch
+        val account = _state.value.destination ?: return@launch
         _state.update { it.copy(step = WizardStep.PICK_DESTINATION, busy = true, error = null) }
-        runCatching { childrenOfRoot(type).filter { it.type == CloudObjectType.FOLDER } }
+        runCatching { childrenOfRoot(account).filter { it.type == CloudObjectType.FOLDER } }
             .onSuccess { folders -> _state.update { it.copy(destinationChildren = folders, busy = false) } }
-            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(type, failure)) } }
+            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(account, failure)) } }
     }
 
     fun chooseDestinationFolder(objectId: String) {
@@ -141,20 +198,24 @@ class NewTransferViewModel @Inject constructor(
         _state.update { it.copy(busy = true, error = null) }
 
         runCatching {
-            val sourceProvider = providers.provider(source)
-            val destinationProvider = providers.provider(destination)
-            val sourceAccount = sourceProvider.authenticate()
-            val destinationAccount = destinationProvider.authenticate()
+            // No authenticate() calls here any more. Both accounts were chosen
+            // in steps 1 and 2 and are already in §12.4; asking the provider
+            // who it is would cost a round trip and, with two accounts of one
+            // provider connected, could not have said which.
+            val sourceType = current.providerOf(source)
+                ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "the source account is no longer connected")
+            val destinationType = current.providerOf(destination)
+                ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "the destination account is no longer connected")
 
             val transfer = repository.createTransfer(
                 TransferEntity(
                     id = TransferId(UUID.randomUUID().toString()),
                     createdAt = clock.instant(),
                     updatedAt = clock.instant(),
-                    sourceProvider = source,
-                    sourceAccountId = sourceAccount.id,
-                    destinationProvider = destination,
-                    destinationAccountId = destinationAccount.id,
+                    sourceProvider = sourceType,
+                    sourceAccountId = source,
+                    destinationProvider = destinationType,
+                    destinationAccountId = destination,
                     destinationRootId = destinationFolder,
                     destinationContainerName = EnclosingFolderNamer.nameFor(clock.instant()),
                     networkPolicy = current.networkPolicy,
@@ -164,7 +225,7 @@ class NewTransferViewModel @Inject constructor(
             val roots = current.sourceChildren.filter { it.id.opaqueId in current.selectedSourceIds }
             val summary = controller.prepare(
                 transfer.id,
-                CloudSelection.of(sourceAccount.id, roots),
+                CloudSelection.of(source, roots),
             )
             transfer.id to summary
         }.onSuccess { (id, summary) ->
@@ -205,18 +266,42 @@ class NewTransferViewModel @Inject constructor(
      * look identical to the user, and this screen spent v0.2 reporting the
      * second as the first. The callers above turn it into a visible message.
      */
-    private suspend fun childrenOfRoot(type: ProviderType): List<CloudObject> {
+    /**
+     * Lists one account's root.
+     *
+     * No longer calls `authenticate()` to discover an account id: the account
+     * was chosen in step 1 or 2 and is already recorded in §12.4. That call
+     * cost a network round trip per step and, with two accounts of one
+     * provider connected, could not have said which of them this is.
+     */
+    private suspend fun childrenOfRoot(account: AccountId): List<CloudObject> {
+        val type = _state.value.providerOf(account)
+            ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "that account is no longer connected")
         val provider = providers.provider(type)
-        val account = provider.authenticate()
-        return provider.listChildren(account.id, provider.rootOf(account.id)).toList()
+        return provider.listChildren(account, provider.rootOf(account)).toList()
     }
 
-    private fun browseFailure(type: ProviderType, failure: Throwable): String = when {
+    private fun browseFailure(account: AccountId, failure: Throwable): String = when {
         // The one failure with an obvious next step. Without this the user sees
         // the adapter's own wording, which explains the state but not the cure.
         failure is CloudException && failure.kind == CloudErrorKind.AUTH_REQUIRED ->
-            "Connect a ${providerLabel(type)} account first, on the Accounts screen."
+            "That account needs reconnecting, on the Accounts screen."
 
-        else -> failure.message ?: "Could not list the contents of ${providerLabel(type)}"
+        else -> {
+            val provider = _state.value.providerOf(account)?.let(::providerLabel) ?: "that account"
+            failure.message ?: "Could not list the contents of $provider"
+        }
+    }
+
+    private companion object {
+        /**
+         * What an account whose provider has no connector can do: nothing.
+         *
+         * Only reachable for a provider this build cannot connect, which
+         * therefore has no account either — but assuming a role would put a
+         * choice in front of the user that cannot work, and §7 is explicit
+         * that the grant decides.
+         */
+        val NO_ROLES = AccountRoles(canBeSource = false, canBeDestination = false)
     }
 }
