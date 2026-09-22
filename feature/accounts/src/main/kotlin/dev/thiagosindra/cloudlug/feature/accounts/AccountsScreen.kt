@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +65,17 @@ fun AccountsScreen(
         connecting = null
     }
 
+    // The intent is built in the ViewModel, not in the button's onClick.
+    // Building it can fail — AppAuth needs a browser and there may not be one —
+    // and an exception thrown from a composable's onClick is uncaught.
+    state.launch?.let { pending ->
+        LaunchedEffect(pending.id) {
+            connecting = pending.provider
+            launcher.launch(pending.intent)
+            viewModel.onAuthorizationLaunched()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -95,10 +107,7 @@ fun AccountsScreen(
                     ProviderCard(
                         row = row,
                         enabled = !state.working,
-                        onConnect = {
-                            connecting = row.provider
-                            launcher.launch(viewModel.authorizationIntent(row.provider))
-                        },
+                        onConnect = { viewModel.requestConnect(row.provider) },
                         onDisconnect = { row.account?.let(viewModel::requestDisconnect) },
                     )
                 }
@@ -167,7 +176,12 @@ private fun ProviderCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (account == null) {
-                    OutlinedButton(onClick = onConnect, enabled = enabled && row.connectable) { Text("Connect") }
+                    // No button at all for a provider this build cannot connect
+                    // yet. A permanently greyed "Connect" invites a press that
+                    // can never do anything; the row already says why.
+                    if (row.connectable) {
+                        OutlinedButton(onClick = onConnect, enabled = enabled) { Text("Connect") }
+                    }
                 } else {
                     OutlinedButton(onClick = onDisconnect, enabled = enabled) { Text("Disconnect") }
                 }

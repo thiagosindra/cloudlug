@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dev.thiagosindra.cloudlug.auth.AccountRepository
 import dev.thiagosindra.cloudlug.auth.AuthorizationCancelledException
+import dev.thiagosindra.cloudlug.auth.NoBrowserAvailableException
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.provider.AccountRoles
 import dev.thiagosindra.cloudlug.provider.CloudAccount
@@ -13,6 +14,7 @@ import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
+import dev.thiagosindra.cloudlug.ui.providerLabel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 
 /** One provider, connected or not (§24.5). */
@@ -47,10 +50,24 @@ data class PendingDisconnect(
     val activeTransfers: Int,
 )
 
+/**
+ * A consent page the screen should now open (§8.1).
+ *
+ * Built here rather than in the click handler because building it can fail —
+ * AppAuth needs a browser, and there may not be one. A composable's `onClick`
+ * is no place for that: an exception thrown there is uncaught and takes the app
+ * down, which is what it did.
+ *
+ * [id] rather than the intent identifies the request, because `Intent` has no
+ * equals and a launch must happen exactly once per press.
+ */
+data class AuthorizationLaunch(val id: Long, val provider: ProviderType, val intent: Intent)
+
 data class AccountsState(
     val rows: List<AccountRow> = emptyList(),
     val working: Boolean = false,
     val pendingDisconnect: PendingDisconnect? = null,
+    val launch: AuthorizationLaunch? = null,
     val message: String? = null,
 )
 
@@ -82,8 +99,11 @@ class AccountsViewModel @Inject constructor(
     private data class LocalState(
         val working: Boolean = false,
         val pendingDisconnect: PendingDisconnect? = null,
+        val launch: AuthorizationLaunch? = null,
         val message: String? = null,
     )
+
+    private val launches = AtomicLong()
 
     val state: StateFlow<AccountsState> = combine(accounts.observe(), local) { connected, local ->
         AccountsState(
@@ -98,12 +118,39 @@ class AccountsViewModel @Inject constructor(
             },
             working = local.working,
             pendingDisconnect = local.pendingDisconnect,
+            launch = local.launch,
             message = local.message,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AccountsState())
 
-    /** §8.1: the Custom Tab the screen launches. */
-    fun authorizationIntent(provider: ProviderType): Intent = accounts.authorizationIntent(provider)
+    /**
+     * §8.1: asks for the consent page, and answers with a message when it
+     * cannot be opened at all.
+     *
+     * The failure this exists for is a device with no browser. §8.1 requires a
+     * browser rather than a WebView so CloudLug never sees the user's
+     * password, so a missing one is a genuine dead end — but a dead end the
+     * user can be told about.
+     */
+    fun requestConnect(provider: ProviderType) {
+        local.value = try {
+            local.value.copy(
+                launch = AuthorizationLaunch(launches.incrementAndGet(), provider, accounts.authorizationIntent(provider)),
+                message = null,
+            )
+        } catch (noBrowser: NoBrowserAvailableException) {
+            local.value.copy(
+                launch = null,
+                message = "CloudLug signs in through your browser so it never sees your password. " +
+                    "This device has no browser installed, so ${providerLabel(provider)} can't be connected here.",
+            )
+        }
+    }
+
+    /** The screen has launched the consent page; do not launch it twice. */
+    fun onAuthorizationLaunched() {
+        local.value = local.value.copy(launch = null)
+    }
 
     fun onAuthorizationResult(provider: ProviderType, result: Intent?) {
         viewModelScope.launch {

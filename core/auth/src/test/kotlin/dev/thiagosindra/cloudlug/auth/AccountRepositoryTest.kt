@@ -40,6 +40,7 @@ class AccountRepositoryTest {
 
         override val provider = ProviderType.DROPBOX
         override fun authorizationIntent(): Intent = error("not needed")
+
         override suspend fun complete(result: Intent?): CloudAccount {
             calls += "complete"
             return account

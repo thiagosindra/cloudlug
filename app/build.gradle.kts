@@ -12,8 +12,8 @@ android {
 
     defaultConfig {
         applicationId = "dev.thiagosindra.cloudlug"
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.3.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // AppAuth's redirect receiver claims this scheme. It is the application
@@ -66,6 +66,15 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
+    // Both declared explicitly because this module's manifest and themes name
+    // them by hand: the manifest merges a theme onto AppAuth's
+    // RedirectUriReceiverActivity, and that theme descends from
+    // Theme.AppCompat. Each arrives transitively through :core:auth, but a
+    // class or style a module references by name belongs to a dependency that
+    // module declares — and lint says so (MissingClass) rather than leaving it
+    // to be discovered when the transitive changes.
+    implementation(libs.androidx.appcompat)
+    implementation(libs.appauth)
     implementation(libs.sqlite.framework)
     implementation(libs.okhttp)
     implementation(libs.hilt.android)

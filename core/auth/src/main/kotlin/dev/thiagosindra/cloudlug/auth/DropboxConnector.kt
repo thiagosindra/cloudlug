@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.auth
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -59,7 +60,6 @@ class DropboxConnector(
 
     override fun authorizationIntent(): Intent {
         val challenge = DropboxOAuth.newChallenge(random)
-        pending.remember(challenge)
 
         val request = AuthorizationRequest.Builder(
             configuration,
@@ -75,7 +75,17 @@ class DropboxConnector(
             .setAdditionalParameters(mapOf("token_access_type" to "offline"))
             .build()
 
-        return service.getAuthorizationRequestIntent(request)
+        // Built first, remembered second. AppAuth throws here when the device
+        // has no browser, and a verifier left in the credential store would be
+        // a credential kept with nothing to spend it on (§8.3).
+        val intent = try {
+            service.getAuthorizationRequestIntent(request)
+        } catch (noBrowser: ActivityNotFoundException) {
+            throw NoBrowserAvailableException()
+        }
+
+        pending.remember(challenge)
+        return intent
     }
 
     override suspend fun complete(result: Intent?): CloudAccount {
