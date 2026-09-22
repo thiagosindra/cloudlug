@@ -63,17 +63,35 @@ internal object DropboxErrors {
             "not_found" in tags || "malformed_path" in tags || status == 404 ->
                 fail(CloudErrorKind.NOT_FOUND, "the object no longer exists", summary)
 
+            // The rest of Dropbox's `LookupError`, which every path-taking route
+            // can answer with. These were missing, so each arrived as the
+            // fall-through below and told the user only "Dropbox returned 409".
+            "not_folder" in tags ->
+                fail(CloudErrorKind.PERMANENT, "that object is a file, not a folder", summary)
+
+            "not_file" in tags ->
+                fail(CloudErrorKind.PERMANENT, "that object is a folder, not a file", summary)
+
+            // Dropbox refuses to serve the bytes at all — a DMCA block or a
+            // team policy. Nothing about retrying changes the answer, and §20.1
+            // already has a place for an object that cannot move as bytes.
+            "restricted_content" in tags ->
+                fail(CloudErrorKind.UNSUPPORTED, "Dropbox will not transfer this object's contents", summary)
+
+            "locked" in tags ->
+                fail(CloudErrorKind.PERMANENT, "that object is locked in Dropbox", summary)
+
             // Dropbox sends 429 with Retry-After; 503 can also carry one.
             status == 429 -> fail(CloudErrorKind.THROTTLED, "rate limited by Dropbox", summary, retryAfter ?: DEFAULT_BACKOFF)
 
             status == 408 || status in 500..599 ->
-                fail(CloudErrorKind.TRANSIENT_NETWORK, "Dropbox returned $status", summary, retryAfter)
+                fail(CloudErrorKind.TRANSIENT_NETWORK, unmapped(status, summary), summary, retryAfter)
 
             // §20.1/§20.2 shaped refusals: a thing that has no bytes to move.
             "unsupported_file" in tags || "unsupported_extension" in tags || "unsupported_content" in tags ->
                 fail(CloudErrorKind.UNSUPPORTED, "Dropbox cannot transfer this object as bytes", summary)
 
-            else -> fail(CloudErrorKind.PERMANENT, "Dropbox returned $status", summary)
+            else -> fail(CloudErrorKind.PERMANENT, unmapped(status, summary), summary)
         }
     }
 
@@ -121,6 +139,25 @@ internal object DropboxErrors {
     /** Null rather than an exception when the node is not a string after all. */
     private fun JsonElement.asText(): String? =
         (this as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+    /**
+     * What to say about a failure this mapping has no case for.
+     *
+     * The status alone is not enough to act on and not enough to report: a bare
+     * "Dropbox returned 409" says only that *something* about the request was
+     * refused, and 409 is the status Dropbox uses for its entire route-specific
+     * error vocabulary. The `error_summary` names which member of that
+     * vocabulary was taken, which is the one fact that identifies the call.
+     *
+     * It was already being carried on [CloudException.code] and dropped by
+     * every screen that shows `message`, so the information existed and reached
+     * nobody. Putting it in the message costs nothing in §26 terms — it is a
+     * tag path such as `path/not_folder/`, with no token, no header and no
+     * filename in it — and turns a report that needs a reproduction into one
+     * that can be read.
+     */
+    private fun unmapped(status: Int, summary: String): String =
+        if (summary.isBlank()) "Dropbox returned $status" else "Dropbox returned $status ($summary)"
 
     private fun fail(
         kind: CloudErrorKind,

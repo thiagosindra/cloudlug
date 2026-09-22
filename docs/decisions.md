@@ -742,3 +742,60 @@ perfectly good.
 **What changes it.** If a provider is ever added whose grant cannot be revoked
 programmatically, the revoke-then-forget order has nothing to revoke, and the
 screen has to say so rather than implying a revocation happened.
+
+---
+
+## ADR-0029 — The Dropbox adapter descends one folder at a time
+
+**Status.** Accepted in v0.4.1, pending spec ratification. Proposed §5 text is
+in `docs/spec-proposals/v1.5.md`.
+
+**Context.** The first real Dropbox → Dropbox transfer failed at the Review
+step with "Dropbox returned 409", and left a transfer stuck in PREPARING
+reporting 0 / 0 files. Neither symptom was the bug. `DropboxCloudProvider`
+enumerated a selection with a single `list_folder` carrying `recursive: true`,
+and that response has two properties the manifest cannot be built without:
+
+- It contains the folder's **contents**, never the folder that was asked about.
+  §10 reproduces the source's own ancestors, so the selected folder is an item
+  of the transfer; `ManifestBuilder` hangs every path off it.
+- Its entries have **no containment between them**. `ManifestBuilder` rebuilds
+  each object's relative path from `parentId` and aborts on a null one.
+
+So the adapter emitted a stream of parentless objects, none of them the root,
+and the builder rejected the first one. The pairing had never run: the Dropbox
+contract suite is live-only, `ManifestBuilder`'s tests use the fake provider,
+and §31.2's shared "parents before children" check asked whether each object's
+parent came earlier — a question an object with no parent passes by having
+nothing to check. Both halves were individually correct and individually
+tested, which is the third defect in a row to live in a handoff rather than in
+a component.
+
+**Decision.** The adapter walks the tree itself, one `list_folder` per folder,
+emitting each selection root before descending into it. Every entry carries the
+folder it was listed under as its `parentId`, which `listChildren` already did
+correctly — the recursive path was the only one that did not.
+
+The alternative, keeping the recursive call and reconstructing containment from
+`path_lower`, was rejected. §6 addresses objects by id precisely so that paths
+need not be trusted, and rebuilding a parent-child relation by string-prefixing
+paths reintroduces the dependency that decision exists to remove — it would
+break on a rename mid-walk, which is the case §11's id-based cursor was chosen
+to survive.
+
+**What it costs.** One request per folder instead of one per page, and one
+folder's children held in memory at a time. §11 already ranks resumability
+above enumeration speed, and `ManifestBuilder` holds a path per object anyway,
+so the memory bound is unchanged. A manifest that cannot be built is worth
+nothing at either speed.
+
+**A selection root may be a file.** §9 puts a checkbox on every row. Listing a
+file earns Dropbox's `path/not_folder`, which is a 409 — one of several 409
+shapes §23 had no case for, all of which reached the user as the bare status.
+The adapter now emits a file root without listing it, §23 maps the rest of
+`LookupError`, and an unmapped failure names its `error_summary` instead of its
+status code.
+
+**What changes it.** An adapter whose API returns containment in a recursive
+listing — parent ids in the entries, not paths — can use it, and should. The
+requirement is the contract in §5, not the number of requests.

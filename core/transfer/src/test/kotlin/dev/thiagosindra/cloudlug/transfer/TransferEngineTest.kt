@@ -5,6 +5,7 @@ import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.NetworkState
 import dev.thiagosindra.cloudlug.model.TransferItemStatus
 import dev.thiagosindra.cloudlug.model.TransferStatus
+import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.fake.FailureInjection
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudProvider
 import dev.thiagosindra.cloudlug.provider.fake.ProcessInterruptedException
@@ -57,6 +58,57 @@ class TransferEngineTest {
             harness.destinationTree(),
             "spec §10 and §20.5: original relative paths and empty folders are preserved",
         )
+    }
+
+    @Test
+    fun `a preparation that fails leaves the transfer failed, not preparing forever`() = runTest {
+        // One object per page, so the injected failure fires after the first
+        // emission rather than a hundred files in.
+        val harness = TransferTestHarness(sourceEnumerationPageSize = 1)
+        val photos = harness.source.storage.folder("photos")
+        harness.source.storage.file("1.png", "first".toByteArray(), photos)
+        harness.source.storage.file("2.png", "second".toByteArray(), photos)
+        harness.source.inject(
+            FailureInjection(
+                FailureInjection.Fault.SERVER_ERROR,
+                FailureInjection.Operation.ENUMERATE,
+                times = Int.MAX_VALUE,
+            ),
+        )
+        val transfer = harness.createTransfer()
+
+        assertFailsWith<CloudException> { harness.engine.prepare(transfer.id, harness.selectionOf(photos)) }
+
+        // The first line of prepare() moves the transfer to PREPARING, and
+        // until this nothing but success moved it out again. A row left in
+        // PREPARING has no process behind it and no action that applies to it:
+        // §24.1 shows it forever, reporting "0 / 0 files", and the user cannot
+        // tell it from a transfer that is genuinely still being prepared.
+        val after = assertNotNull(harness.repository.findTransfer(transfer.id))
+        assertEquals(TransferStatus.FAILED, after.status)
+        assertNotNull(after.lastErrorMessage, "a failed preparation has to say what failed")
+
+        harness.cleanUp()
+    }
+
+    @Test
+    fun `a preparation that runs out of destination space keeps its own diagnosis`() = runTest {
+        val harness = TransferTestHarness(destinationQuotaBytes = 1)
+        val file = harness.source.storage.file("big.bin", ByteArray(4_096))
+        val transfer = harness.createTransfer()
+
+        assertFailsWith<InsufficientDestinationQuotaException> {
+            harness.engine.prepare(transfer.id, harness.selectionOf(file))
+        }
+
+        // §20.7 fails the row itself, with the reason the general handler could
+        // not have known. §13.1 has no FAILED -> FAILED, so the handler has to
+        // stay out of its way rather than overwrite it or throw on top of it.
+        val after = assertNotNull(harness.repository.findTransfer(transfer.id))
+        assertEquals(TransferStatus.FAILED, after.status)
+        assertEquals("destination_quota_insufficient", after.lastErrorCode)
+
+        harness.cleanUp()
     }
 
     @Test

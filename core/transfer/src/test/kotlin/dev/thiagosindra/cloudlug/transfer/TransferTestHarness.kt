@@ -42,6 +42,12 @@ class TransferTestHarness(
         nativeHashAlgorithm = HashAlgorithm.MD5,
     ),
     destinationQuotaBytes: Long? = 10 * GIB,
+    /**
+     * How many objects the source emits between the points at which an
+     * injected enumeration failure can fire. Lowered by a test that needs
+     * enumeration to fail partway without seeding a hundred files to get there.
+     */
+    sourceEnumerationPageSize: Int = 100,
     cachePolicy: CacheBudgetPolicy = CacheBudgetPolicy(),
     private var networkSupplier: () -> NetworkState = { NetworkState.UNMETERED },
     private var storage: StorageSnapshot = StorageSnapshot(freeBytes = 40 * GIB, totalBytes = 64 * GIB),
@@ -56,6 +62,7 @@ class TransferTestHarness(
         type = ProviderType.DROPBOX,
         capabilities = sourceCapabilities,
         accountId = AccountId("source-account"),
+        enumerationPageSize = sourceEnumerationPageSize,
     )
 
     val destination = FakeCloudProvider(

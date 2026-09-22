@@ -197,6 +197,11 @@ class NewTransferViewModel @Inject constructor(
         val destinationFolder = current.destinationFolderId ?: return@launch
         _state.update { it.copy(busy = true, error = null) }
 
+        // Held outside the block so a failure can take back the row the block
+        // created: §11 needs somewhere to write the manifest before it knows
+        // whether there is one, so the transfer necessarily exists first.
+        var created: TransferId? = null
+
         runCatching {
             // No authenticate() calls here any more. Both accounts were chosen
             // in steps 1 and 2 and are already in §12.4; asking the provider
@@ -221,6 +226,7 @@ class NewTransferViewModel @Inject constructor(
                     networkPolicy = current.networkPolicy,
                 ),
             )
+            created = transfer.id
 
             val roots = current.sourceChildren.filter { it.id.opaqueId in current.selectedSourceIds }
             val summary = controller.prepare(
@@ -233,6 +239,13 @@ class NewTransferViewModel @Inject constructor(
                 it.copy(step = WizardStep.REVIEW, transferId = id, summary = summary, busy = false)
             }
         }.onFailure { failure ->
+            // The user is still standing in the wizard and is about to read the
+            // error, so the half-made transfer has no one to belong to. Left
+            // alone it sits on §24.1 reporting "Preparing, 0 / 0 files" with no
+            // process behind it and no action that applies to it. §24.2 step 5
+            // wants a review the user backs out of to leave nothing behind, and
+            // one that never got as far as a manifest is the same thing.
+            created?.let { id -> runCatching { repository.discardTransfer(id) } }
             _state.update { it.copy(busy = false, error = failure.message ?: "Could not prepare the transfer") }
         }
     }

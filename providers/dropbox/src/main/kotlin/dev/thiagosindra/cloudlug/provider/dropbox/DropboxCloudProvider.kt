@@ -1,6 +1,7 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
 import dev.thiagosindra.cloudlug.model.AccountId
+import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.provider.CloudAccount
@@ -23,6 +24,7 @@ import dev.thiagosindra.cloudlug.provider.dropbox.DropboxObjects.longField
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxObjects.stringField
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.toList
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -105,7 +107,7 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
     }
 
     override fun listChildren(account: AccountId, parent: CloudObjectId): Flow<CloudObject> =
-        listFolder(account, parent, recursive = false)
+        listFolder(account, parent)
 
     /**
      * §11's depth-first walk, resumable after process death.
@@ -115,6 +117,27 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
      * expires. So a resumed walk re-lists and skips until it passes
      * [resumeAfter] — slower, but idempotent, which §11 says is the property
      * that matters because the manifest deduplicates by source object id.
+     *
+     * ### Why this descends a level at a time instead of asking for the subtree
+     *
+     * Dropbox will return a whole subtree from one `list_folder` with
+     * `recursive`, and v0.3 used it. Two properties `ManifestBuilder` depends
+     * on are not in that response:
+     *
+     *  - **Every object names its parent.** A recursive page gives entries with
+     *    no containment between them — the adapter has only paths to relate
+     *    them by, and §6 addresses objects by id precisely so that paths need
+     *    not be trusted. `ManifestBuilder` reconstructs each object's relative
+     *    path from `parentId`, and a null one aborts the walk with "emitted
+     *    before its parent".
+     *  - **The roots themselves are part of the walk.** `list_folder` returns a
+     *    folder's *contents*; the folder the user actually selected never
+     *    appears. §10 reproduces the source's own ancestors, so the selected
+     *    folder is an item of the transfer, not just a cursor into one.
+     *
+     * Descending explicitly costs one request per folder rather than one per
+     * page. That is the price of a manifest that can be built at all, and §11
+     * ranks correctness and resumability above enumeration speed.
      */
     override fun enumerate(
         account: AccountId,
@@ -127,14 +150,23 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
         // looks complete with no work in it. One metadata call decides it, and
         // a full re-walk is safe because §11 deduplicates by source object id.
         var skipping = resumeAfter != null && exists(account, resumeAfter)
-        for (root in selection.roots) {
-            listFolder(account, root.cloudObject.id, recursive = true).collect { entry ->
-                if (skipping) {
-                    if (entry.id == resumeAfter) skipping = false
-                } else {
-                    emit(entry)
-                }
+
+        // Depth-first with the children of a folder following it immediately,
+        // which is the order §5 promises and §11's cursor assumes.
+        val pending = ArrayDeque(selection.roots.map { it.cloudObject }.asReversed())
+        while (pending.isNotEmpty()) {
+            val current = pending.removeLast()
+            if (skipping) {
+                if (current.id == resumeAfter) skipping = false
+            } else {
+                emit(current)
             }
+
+            // §9 lets the user tick a file as readily as a folder, so a root is
+            // not necessarily something that can be listed. Asking Dropbox to
+            // list a file earns a shaped refusal, not an empty page.
+            if (current.type != CloudObjectType.FOLDER) continue
+            listFolder(account, current.id).toList().asReversed().forEach(pending::addLast)
         }
     }
 
@@ -142,25 +174,22 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
         runCatching { resolveMetadata(account, objectId) }.isSuccess
 
     /**
-     * One `list_folder`, followed as many `list_folder/continue` pages as
-     * Dropbox offers.
+     * One level of one folder: `list_folder`, followed by as many
+     * `list_folder/continue` pages as Dropbox offers.
      *
      * Emitted per page rather than collected, so a folder with thousands of
-     * children starts drawing rows immediately (§5).
+     * children starts drawing rows immediately (§5). Every entry carries
+     * [parent], which is the containment `ManifestBuilder` rebuilds paths from.
      */
-    private fun listFolder(account: AccountId, parent: CloudObjectId, recursive: Boolean): Flow<CloudObject> = flow {
+    private fun listFolder(account: AccountId, parent: CloudObjectId): Flow<CloudObject> = flow {
         var page = api.rpc(
             account,
             "/2/files/list_folder",
-            buildJsonObject {
-                put("path", DropboxObjects.apiPath(parent))
-                put("recursive", recursive)
-            },
+            buildJsonObject { put("path", DropboxObjects.apiPath(parent)) },
         )
         while (true) {
             (page["entries"] as? JsonArray).orEmpty().forEach { element ->
-                DropboxObjects.toCloudObject(element.jsonObject, parent.takeIf { !recursive })
-                    ?.let { emit(it) }
+                DropboxObjects.toCloudObject(element.jsonObject, parent)?.let { emit(it) }
             }
             if (!page.boolField("has_more")) return@flow
             val cursor = page.stringField("cursor") ?: return@flow

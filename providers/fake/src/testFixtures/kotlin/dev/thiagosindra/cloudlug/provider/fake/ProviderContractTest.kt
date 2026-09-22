@@ -101,6 +101,27 @@ abstract class ProviderContractTest {
     }
 
     @Test
+    fun `enumerate emits every selection root`() = runTest {
+        val provider = newProvider()
+        val root = rootFolder(provider)
+        val photos = seedFolder(provider, root, "photos")
+        seedFile(provider, photos, "1.png", byteArrayOf(1))
+
+        val emitted = provider.enumerate(account(provider), selectionOf(provider, photos)).toList()
+
+        // The selected folder is part of the transfer, not merely a cursor into
+        // it: §10 reproduces the source's own ancestors, so `photos` itself has
+        // to arrive or the manifest has nowhere to hang its children. The
+        // Dropbox adapter listed the root's *contents* and never emitted the
+        // root, which `ManifestBuilder` answers with "emitted before its
+        // parent" on the very first child.
+        assertTrue(
+            emitted.any { it.id == photos },
+            "the selection root must be emitted, but enumerate gave ${emitted.map { it.name }}",
+        )
+    }
+
+    @Test
     fun `enumerate emits parents before children`() = runTest {
         val provider = newProvider()
         val root = rootFolder(provider)
@@ -110,15 +131,43 @@ abstract class ProviderContractTest {
 
         val emitted = provider.enumerate(account(provider), selectionOf(provider, photos)).toList()
         val positions = emitted.withIndex().associate { (index, obj) -> obj.id to index }
+        val roots = setOf(photos)
 
+        // Asserted as a property of *every* object rather than of the ones that
+        // happen to carry a parent. The earlier version skipped an object whose
+        // `parentId` was null, which made it silently vacuous for an adapter
+        // that set no parents at all — precisely the adapter that was broken.
         emitted.forEach { obj ->
-            val parent = obj.parentId ?: return@forEach
-            val parentPosition = positions[parent] ?: return@forEach
+            if (obj.id in roots) return@forEach
+            val parent = assertNotNull(
+                obj.parentId,
+                "${obj.name} was emitted with no parent; only a selection root may have none",
+            )
+            val parentPosition = assertNotNull(
+                positions[parent],
+                "${obj.name} names a parent that enumerate never emitted",
+            )
             assertTrue(
                 parentPosition < positions.getValue(obj.id),
                 "${obj.name} was emitted before its parent",
             )
         }
+    }
+
+    @Test
+    fun `enumerate accepts a file as a selection root`() = runTest {
+        val provider = newProvider()
+        val file = seedFile(provider, rootFolder(provider), "alone.txt", byteArrayOf(1))
+
+        // §9 puts a checkbox on every row, files included, so a selection root
+        // is not necessarily a folder. An adapter that assumes otherwise asks
+        // the provider to list a file and gets a shaped refusal back.
+        val emitted = provider.enumerate(
+            account(provider),
+            selectionOf(provider, file, type = CloudObjectType.FILE),
+        ).toList()
+
+        assertEquals(listOf(file), emitted.map { it.id })
     }
 
     @Test
@@ -354,12 +403,16 @@ abstract class ProviderContractTest {
 
     // ------------------------------------------------------------------ helpers
 
-    protected fun selectionOf(provider: CloudProvider, vararg roots: CloudObjectId): CloudSelection {
+    protected fun selectionOf(
+        provider: CloudProvider,
+        vararg roots: CloudObjectId,
+        type: CloudObjectType = CloudObjectType.FOLDER,
+    ): CloudSelection {
         val objects = roots.map { id ->
             CloudObject(
                 id = id,
                 name = id.opaqueId,
-                type = CloudObjectType.FOLDER,
+                type = type,
                 parentId = null,
                 size = null,
                 modifiedAt = null,

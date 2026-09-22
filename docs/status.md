@@ -1,9 +1,26 @@
-# Status — v0.4 in progress (two accounts, one provider)
+# Status — v0.4.1 (the first real transfer, and why it did not work)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account** rather than against a fake that agrees with
-us. As of 2026-09-22 that includes a Dropbox account connected from the app on
-a real phone: §8.1 end to end, on the third attempt.
+us. As of 2026-09-22 that includes two Dropbox accounts connected from the app
+on a real phone: §8.1 end to end, on the third attempt.
+
+**The first real Dropbox → Dropbox transfer failed**, at the Review step, with
+"Dropbox returned 409" and a transfer left stuck in PREPARING reporting
+0 / 0 files. Neither symptom was the bug. `enumerate` asked Dropbox for the
+whole subtree in one recursive call, and that response contains neither the
+selected folder nor any containment between its entries — so `ManifestBuilder`,
+which rebuilds every relative path from `parentId`, rejected the first object it
+was handed. The adapter now walks the tree a folder at a time (ADR-0029).
+
+This is the third defect in a row to live in a **handoff** rather than in a
+component, and the most expensive: the Dropbox contract suite is live-only,
+`ManifestBuilder`'s tests use the fake provider, and §31.2's shared
+"parents before children" check asked whether each object's parent came
+earlier — which an object with **no** parent passes by having nothing to check.
+Both halves were green continuously while the only pairing that ships could not
+complete a single transfer.
+
 Milestone definitions are in spec §33; design decisions are in
 [`decisions.md`](decisions.md), where every ADR carries a Status line recording
 whether the spec ratified or overruled it.
