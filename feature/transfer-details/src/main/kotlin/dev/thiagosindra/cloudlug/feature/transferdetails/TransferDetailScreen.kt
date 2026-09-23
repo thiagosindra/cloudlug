@@ -52,7 +52,7 @@ fun TransferDetailScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(transfer?.directionLabel() ?: "Transfer") },
+                title = { Text(transfer?.directionLabel(state.accountNames) ?: "Transfer") },
                 navigationIcon = { IconButton(onClick = onBack) { Text("<") } },
             )
         },

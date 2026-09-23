@@ -46,18 +46,12 @@ class DropboxEnumerationTest {
 
     @Test
     fun `the selected folder is emitted, followed by its descendants`() = runTest {
-        // photos/            <- the selection root
-        //   2026/
-        //     1.png
-        respondWith(
-            "id:photos" to listing(folder("id:2026", "2026")),
-            "id:2026" to listing(file("id:1png", "1.png", size = 11)),
-        )
+        respondWith(WORKSPACE to "list_folder_200", NESTED to "list_folder_nested_200")
 
-        val emitted = provider().enumerate(ACCOUNT, selectionOf(folderObject("id:photos", "photos"))).toList()
+        val emitted = provider().enumerate(ACCOUNT, selectionOf(folderObject(WORKSPACE, WORKSPACE_NAME))).toList()
 
         assertEquals(
-            listOf("photos", "2026", "1.png"),
+            listOf(WORKSPACE_NAME, NESTED_NAME, LEAF_NAME),
             emitted.map { it.name },
             "§10 reproduces the source's own ancestors, so the selected folder is an item of the " +
                 "transfer and not merely a cursor into one",
@@ -66,12 +60,9 @@ class DropboxEnumerationTest {
 
     @Test
     fun `every object below a root names the parent it was found under`() = runTest {
-        respondWith(
-            "id:photos" to listing(folder("id:2026", "2026")),
-            "id:2026" to listing(file("id:1png", "1.png", size = 11)),
-        )
+        respondWith(WORKSPACE to "list_folder_200", NESTED to "list_folder_nested_200")
 
-        val emitted = provider().enumerate(ACCOUNT, selectionOf(folderObject("id:photos", "photos"))).toList()
+        val emitted = provider().enumerate(ACCOUNT, selectionOf(folderObject(WORKSPACE, WORKSPACE_NAME))).toList()
         val byName = emitted.associateBy { it.name }
 
         // This is the property the crash came from. `ManifestBuilder` builds an
@@ -80,13 +71,17 @@ class DropboxEnumerationTest {
         // parent". v0.3 asked Dropbox for the whole subtree in one recursive
         // call, which returns entries with no containment between them, so
         // every object arrived parentless and the first child aborted the walk.
+        //
+        // The two ids come out of the fixtures rather than being written here,
+        // so a capture run that assigns different pseudonyms still exercises
+        // the same containment.
         assertEquals(
-            DropboxObjects.idOf("id:photos"),
-            assertNotNull(byName.getValue("2026").parentId, "a folder below the root must name its parent"),
+            DropboxObjects.idOf(WORKSPACE),
+            assertNotNull(byName.getValue(NESTED_NAME).parentId, "a folder below the root must name its parent"),
         )
         assertEquals(
-            DropboxObjects.idOf("id:2026"),
-            assertNotNull(byName.getValue("1.png").parentId, "a file must name the folder it was listed under"),
+            DropboxObjects.idOf(NESTED),
+            assertNotNull(byName.getValue(LEAF_NAME).parentId, "a file must name the folder it was listed under"),
         )
     }
 
@@ -94,11 +89,7 @@ class DropboxEnumerationTest {
     fun `a file chosen as the selection root is emitted without being listed`() = runTest {
         // §9 puts a checkbox on every row. Listing a file earns Dropbox's
         // `path/not_folder`, which is a 409 — and a 409 was all the user saw.
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest) = MockResponse()
-                .setResponseCode(409)
-                .setBody("""{"error_summary":"path/not_folder/","error":{".tag":"path",".tag":"not_folder"}}""")
-        }
+        alwaysRespond(409, Fixtures.raw("list_folder_not_folder_409"))
 
         val alone = CloudObject(
             id = DropboxObjects.idOf("id:alone"),
@@ -120,11 +111,7 @@ class DropboxEnumerationTest {
 
     @Test
     fun `an unmapped refusal says which Dropbox error it was`() = runTest {
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest) = MockResponse()
-                .setResponseCode(409)
-                .setBody("""{"error_summary":"path/some_future_tag/","error":{".tag":"path"}}""")
-        }
+        alwaysRespond(409, """{"error_summary":"path/some_future_tag/","error":{".tag":"path"}}""")
 
         val failure = runCatching {
             provider().enumerate(ACCOUNT, selectionOf(folderObject("id:photos", "photos"))).toList()
@@ -142,12 +129,13 @@ class DropboxEnumerationTest {
 
     @Test
     fun `a file chosen as a root is not confused for a folder by the error mapping`() {
-        val mapped = DropboxErrors.toException(
-            409,
-            """{"error_summary":"path/not_folder/","error":{".tag":"path","reason":{".tag":"not_folder"}}}""",
-        )
+        // Straight from the fixture, so §23's mapping is checked against the
+        // shape the adapter will actually be handed rather than against a
+        // second guess at it.
+        val mapped = DropboxErrors.toException(409, Fixtures.raw("list_folder_not_folder_409"))
+
         assertEquals("that object is a file, not a folder", mapped.message)
-        assertEquals("path/not_folder/", mapped.code)
+        assertEquals("path/not_folder/...", mapped.code)
     }
 
     // ------------------------------------------------------------------ helpers
@@ -176,25 +164,20 @@ class DropboxEnumerationTest {
         val byPath = folders.toMap()
         server.dispatcher = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
-                val body = request.body.readUtf8()
-                val path = PATH.find(body)?.groupValues?.get(1)
-                val listing = byPath[path] ?: return MockResponse().setResponseCode(409).setBody(
-                    """{"error_summary":"path/not_found/","error":{".tag":"path","reason":{".tag":"not_found"}}}""",
-                )
-                return MockResponse().setResponseCode(200).setBody(listing)
+                val path = PATH.find(request.body.readUtf8())?.groupValues?.get(1)
+                val fixture = byPath[path] ?: return MockResponse().setResponseCode(409)
+                    .setBody(Fixtures.raw("get_metadata_not_found_409"))
+                return MockResponse().setResponseCode(200).setBody(Fixtures.raw(fixture))
             }
         }
     }
 
-    private fun listing(vararg entries: String) =
-        """{"entries":[${entries.joinToString(",")}],"cursor":"c","has_more":false}"""
-
-    private fun folder(id: String, name: String) =
-        """{".tag":"folder","id":"$id","name":"$name","path_lower":"/${name.lowercase()}"}"""
-
-    private fun file(id: String, name: String, size: Long) =
-        """{".tag":"file","id":"$id","name":"$name","size":$size,"rev":"0123456789ab",""" +
-            """"server_modified":"2026-09-21T10:00:00Z","path_lower":"/${name.lowercase()}"}"""
+    private fun alwaysRespond(status: Int, body: String) {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest) =
+                MockResponse().setResponseCode(status).setBody(body)
+        }
+    }
 
     private fun folderObject(id: String, name: String) = CloudObject(
         id = DropboxObjects.idOf(id),
@@ -219,5 +202,14 @@ class DropboxEnumerationTest {
     private companion object {
         val ACCOUNT = AccountId("dbid:AAA")
         val PATH = """"path"\s*:\s*"([^"]*)"""".toRegex()
+
+        // Read from the fixtures, never written here: a capture run assigns
+        // its own pseudonyms, and a test that hardcoded them would start
+        // failing for a reason that has nothing to do with the adapter.
+        val WORKSPACE: String = Fixtures.metadata("create_folder_v2_200", "id")
+        val WORKSPACE_NAME: String = Fixtures.metadata("create_folder_v2_200", "name")
+        val NESTED: String = Fixtures.entryId("list_folder_200")
+        val NESTED_NAME: String = Fixtures.entryName("list_folder_200")
+        val LEAF_NAME: String = Fixtures.entryName("list_folder_nested_200")
     }
 }

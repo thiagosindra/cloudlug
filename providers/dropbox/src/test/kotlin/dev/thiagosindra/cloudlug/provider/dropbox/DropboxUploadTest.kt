@@ -60,7 +60,7 @@ class DropboxUploadTest {
             UploadRequest(
                 account = ACCOUNT,
                 parent = parent,
-                name = "quarterly.doc",
+                name = Fixtures.field(FINISH, "name"),
                 size = SIZE,
                 mimeType = null,
             ),
@@ -77,8 +77,8 @@ class DropboxUploadTest {
             "Dropbox declares supportsServerHash, so §21 has nothing to verify with if finishUpload drops it",
         )
         assertEquals(HashAlgorithm.DROPBOX_CONTENT_HASH, hash.algorithm)
-        assertEquals(CONTENT_HASH, hash.value)
-        assertEquals("a1c10ce0dd78", uploaded.revision, "§20.6 detects a source that changed mid-transfer")
+        assertEquals(Fixtures.field(FINISH, "content_hash"), hash.value)
+        assertEquals(Fixtures.field(FINISH, "rev"), uploaded.revision, "§20.6 detects a source that changed mid-transfer")
     }
 
     @Test
@@ -110,29 +110,19 @@ class DropboxUploadTest {
 
     // ------------------------------------------------------------------ helpers
 
-    /** The three routes an upload takes, answering as Dropbox really does. */
+    /** The three routes an upload takes, replayed from the recorded bodies. */
     private fun serveUploadSession() {
         server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse = when {
-                request.path?.endsWith("/upload_session/start") == true ->
-                    MockResponse().setResponseCode(200).setBody("""{"session_id":"ABCDEF"}""")
-
-                request.path?.endsWith("/upload_session/append_v2") == true ->
-                    MockResponse().setResponseCode(200).setBody("")
-
-                // A FileMetadata struct: no `.tag`, because the route returns
-                // only this one type. Recorded from a real finish response.
-                request.path?.endsWith("/upload_session/finish") == true ->
-                    MockResponse().setResponseCode(200).setBody(
-                        """{"name":"quarterly.doc","id":"id:uploadedfile",""" +
-                            """"client_modified":"2026-09-22T15:18:00Z",""" +
-                            """"server_modified":"2026-09-22T15:18:01Z",""" +
-                            """"rev":"a1c10ce0dd78","size":$SIZE,""" +
-                            """"path_lower":"/destination/cloudlug - 2026-09-22 15-18/quarterly.doc",""" +
-                            """"content_hash":"$CONTENT_HASH","is_downloadable":true}""",
-                    )
-
-                else -> MockResponse().setResponseCode(404)
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                val fixture = when {
+                    request.path?.endsWith("/upload_session/start") == true -> "upload_session_start_200"
+                    request.path?.endsWith("/upload_session/append_v2") == true -> "upload_session_append_v2_200"
+                    // The one that mattered: a FileMetadata struct, with no
+                    // `.tag`, because this route returns only the one type.
+                    request.path?.endsWith("/upload_session/finish") == true -> "upload_session_finish_200"
+                    else -> return MockResponse().setResponseCode(404)
+                }
+                return MockResponse().setResponseCode(200).setBody(Fixtures.raw(fixture))
             }
         }
     }
@@ -161,7 +151,9 @@ class DropboxUploadTest {
 
     private companion object {
         val ACCOUNT = AccountId("dbid:AAA")
-        const val SIZE = 42_496L
-        const val CONTENT_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        const val FINISH = "upload_session_finish_200"
+
+        /** What the fixture says was committed; §21 compares against exactly this. */
+        val SIZE: Long = Fixtures.number(FINISH, "size")
     }
 }
