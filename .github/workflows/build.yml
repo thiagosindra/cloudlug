@@ -209,7 +209,20 @@ jobs:
           # SPIKE: proves the recovery harness can force-stop CloudLug and
           # survive it. :app:installDebug first, because the harness
           # instruments itself and so installs only its own two APKs.
-          script: ./gradlew :tools:recovery-test:connectedDebugAndroidTest --stacktrace
+          # No --stacktrace. On a test failure Gradle prints ~140 lines of
+          # its own executor internals, which pushes the instrumentation's
+          # actual message out of any readable tail of the log — two spike
+          # runs were spent unable to see why a single assertion failed. The
+          # step below prints the result XML instead, which is the part that
+          # says something.
+          script: ./gradlew :tools:recovery-test:connectedDebugAndroidTest
+
+      - name: Print the instrumentation results
+        if: failure()
+        run: |
+          # The one thing worth reading when a device test fails.
+          find . -path '*androidTest-results*' -name '*.xml' -print -exec cat {} \; | head -200
+          find . -path '*androidTests/connected*' -name '*.txt' -print -exec cat {} \; | head -100
 
       - name: Upload instrumentation reports
         if: failure()
