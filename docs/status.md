@@ -1,9 +1,16 @@
-# Status — v0.4.2 (the first real transfer, and the three things in the way)
+# Status — v0.4 delivered (two Dropbox accounts, and transfers between them)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account** rather than against a fake that agrees with
 us. As of 2026-09-22 that includes two Dropbox accounts connected from the app
 on a real phone: §8.1 end to end, on the third attempt.
+
+**v0.4 is delivered.** Two Dropbox accounts connect from the app, §2.2 permits
+the pair, the wizard picks accounts on both sides and browses each account's
+tree, and **files now move between two real Dropbox accounts on a real phone**.
+Three defects stood between the milestone's code and that sentence, and all
+three lived in a *handoff* rather than in a component — each part was
+individually correct and individually tested.
 
 **The first real Dropbox → Dropbox transfer failed**, at the Review step, with
 "Dropbox returned 409" and a transfer left stuck in PREPARING reporting
@@ -273,26 +280,45 @@ share.
   `insufficient_space` fixture is the body of a failed run, its session id
   pseudonymized, and it corrected
   a reconstruction of mine that had the union nested when Dropbox flattens it.
+- **Two Dropbox accounts connected at once** (2026-09-22), each with its own
+  credential under its own Keystore key, both listed on §24.5.
+- **A Dropbox → Dropbox transfer, completing** (2026-09-23). Files enumerated
+  from one real account, downloaded to the device, uploaded to a second real
+  account, and verified at the destination against Dropbox's own
+  `content_hash` (§21). This is the sentence v0.4 existed to make true, and it
+  took three fixes after the milestone's code was written.
+- **Four §23 error shapes, as diagnosis rather than as fixtures.** `409`
+  with no mapped tag, `path/not_folder`, and the two failures above were all
+  first seen on a real account. What CI knows about them is a guess (below).
 
 ### Only against the fake, or only against MockWebServer
 
-- **The transfer engine driving Dropbox.** Every §22 behaviour — pause, resume,
-  cancel one file mid-upload, retry — is covered against the fake with the
-  §31.3 delay injections, and against Dropbox not at all. The contract suite
-  checks the adapter's surface, not a transfer running through it.
-- **Recovery after process death with a real account.** §31.4's scenarios run
-  against the fake only.
+- **Every offline fixture except one.** `docs/testing.md` rule 1 says a
+  recorded test replays what the service sent, and is explicit that a
+  hand-written approximation does not count. Right now only
+  `errors/upload_insufficient_space_409.json` meets that bar. Everything in
+  `providers/dropbox/src/test/resources/fixtures/` is **shaped by hand and
+  unverified**, and its README says so at the top. The capture tool that
+  replaces them exists —
+  `./gradlew :tools:dropbox-capture:captureDropboxFixtures` — and has not been
+  run, because it needs a live scratch account. Until it is, the offline tests
+  prove that the adapter is self-consistent, not that it agrees with Dropbox.
+  That distinction is not academic: both of this milestone's adapter bugs were
+  a plausible guess about a response shape that differed from the real one in
+  exactly the way that mattered.
+- **A transfer running through Dropbox under load.** Every §22 behaviour —
+  pause, resume, cancel one file mid-upload, retry — is covered against the
+  fake with the §31.3 delay injections. A real transfer has now completed, but
+  nobody has paused or cancelled one mid-file against a real account.
+- **Recovery after process death, anywhere.** §31.4's scenarios run against
+  the fake only, and the engine still runs in an app-scoped coroutine that dies
+  with the process — so no transfer longer than a screen-off interval can even
+  be attempted. That is what v0.5 is for.
 - **The browser leg, still.** The emulator test covers §24.5 up to the point
   where a Custom Tab would open, and `OAuthRedirectTest` covers the return trip
   from the point the browser hands it back. The tab itself has only ever run on
   a phone, and cannot run in CI — but it has now run there successfully, which
   is a different thing from untested (see below).
-- **A transfer that actually moves bytes between two real accounts.** This has
-  never happened, and it is what v0.4 exists to make possible: the adapter can
-  now hold two Dropbox accounts at once, so the next thing to try is a real
-  Dropbox-to-Dropbox transfer. Everything §22 and §21 do — chunking,
-  verification, pause, resume, collisions — has been exercised against the
-  fake only.
 - **Rate limits, throttling and `Retry-After`.** The §23 mapping is tested
   against synthetic bodies. No real 429 has been seen.
 - **Large files, deep trees, awkward names.** The live suite uses small

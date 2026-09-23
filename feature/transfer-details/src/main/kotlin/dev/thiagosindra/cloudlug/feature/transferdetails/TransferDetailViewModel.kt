@@ -4,8 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dev.thiagosindra.cloudlug.auth.AccountRepository
 import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.database.entity.TransferItemEntity
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferItemId
 import dev.thiagosindra.cloudlug.model.TransferItemStatus
@@ -22,6 +24,8 @@ import javax.inject.Inject
 data class DetailState(
     val transfer: TransferEntity? = null,
     val items: List<TransferItemEntity> = emptyList(),
+    /** For §24.3's title, which names both ends by account at one provider. */
+    val accountNames: Map<AccountId, String> = emptyMap(),
 ) {
     /** The item currently moving bytes, which §24.3 shows as CURRENT FILE. */
     val currentItem: TransferItemEntity?
@@ -54,6 +58,7 @@ data class DetailState(
 @HiltViewModel
 class TransferDetailViewModel @Inject constructor(
     private val controller: TransferController,
+    accounts: AccountRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -63,7 +68,16 @@ class TransferDetailViewModel @Inject constructor(
         combine(
             controller.observeTransfer(transferId),
             controller.observeItems(transferId),
-        ) { transfer, items -> DetailState(transfer, items) }
+            accounts.observe(),
+        ) { transfer, items, connected ->
+            DetailState(
+                transfer = transfer,
+                items = items,
+                accountNames = connected.mapNotNull { account ->
+                    (account.displayEmail ?: account.displayName)?.let { account.id to it }
+                }.toMap(),
+            )
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
 
     fun start() = viewModelScope.launch { controller.start(transferId) }

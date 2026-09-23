@@ -26,6 +26,7 @@ import dev.thiagosindra.cloudlug.database.entity.TransferEntity
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.ui.TransferProgress
 import dev.thiagosindra.cloudlug.ui.bytesAreLowerBound
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.ui.directionLabel
 import dev.thiagosindra.cloudlug.ui.formatCount
 import dev.thiagosindra.cloudlug.ui.progressFraction
@@ -81,13 +82,13 @@ fun HomeScreen(
             if (state.active.isNotEmpty()) {
                 item { SectionHeading("Active") }
                 items(state.active, key = { it.id.value }) { transfer ->
-                    ActiveCard(transfer) { onOpenTransfer(transfer.id) }
+                    ActiveCard(transfer, state.accountNames) { onOpenTransfer(transfer.id) }
                 }
             }
             if (state.history.isNotEmpty()) {
                 item { SectionHeading("History") }
                 items(state.history, key = { it.id.value }) { transfer ->
-                    HistoryCard(transfer) { onOpenTransfer(transfer.id) }
+                    HistoryCard(transfer, state.accountNames) { onOpenTransfer(transfer.id) }
                 }
             }
         }
@@ -104,7 +105,11 @@ private fun SectionHeading(text: String) {
 }
 
 @Composable
-private fun ActiveCard(transfer: TransferEntity, onClick: () -> Unit) {
+private fun ActiveCard(
+    transfer: TransferEntity,
+    accountNames: Map<AccountId, String>,
+    onClick: () -> Unit,
+) {
     Card(
         Modifier
             .fillMaxWidth()
@@ -112,7 +117,7 @@ private fun ActiveCard(transfer: TransferEntity, onClick: () -> Unit) {
             .clickable(onClick = onClick),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(transfer.directionLabel(), style = MaterialTheme.typography.titleSmall)
+            Text(transfer.directionLabel(accountNames), style = MaterialTheme.typography.titleSmall)
             Text(
                 transfer.summaryLine(),
                 style = MaterialTheme.typography.bodySmall,
@@ -132,7 +137,11 @@ private fun ActiveCard(transfer: TransferEntity, onClick: () -> Unit) {
 }
 
 @Composable
-private fun HistoryCard(transfer: TransferEntity, onClick: () -> Unit) {
+private fun HistoryCard(
+    transfer: TransferEntity,
+    accountNames: Map<AccountId, String>,
+    onClick: () -> Unit,
+) {
     Card(
         Modifier
             .fillMaxWidth()
@@ -140,7 +149,7 @@ private fun HistoryCard(transfer: TransferEntity, onClick: () -> Unit) {
             .clickable(onClick = onClick),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(transfer.directionLabel(), style = MaterialTheme.typography.titleSmall)
+            Text(transfer.directionLabel(accountNames), style = MaterialTheme.typography.titleSmall)
             Text(
                 "${transfer.summaryLine()} • ${formatCount(transfer.totalFiles)} files",
                 style = MaterialTheme.typography.bodySmall,
