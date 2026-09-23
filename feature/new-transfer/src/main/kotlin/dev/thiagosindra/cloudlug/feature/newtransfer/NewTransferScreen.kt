@@ -22,12 +22,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -117,57 +120,110 @@ fun NewTransferScreen(
                         onSelect = viewModel::chooseDestination,
                     )
 
-                    WizardStep.PICK_SOURCE -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                        if (state.sourceChildren.isEmpty()) {
-                            item { EmptyNotice(state, "There is nothing in this account to transfer.") }
-                        }
-                        items(state.sourceChildren, key = { it.id.opaqueId }) { obj ->
-                            ListItem(
-                                // The whole row toggles, not just the checkbox:
-                                // a 24dp target beside a full-width row is the
-                                // wrong thing to aim at on a phone.
-                                modifier = Modifier.clickable {
-                                    viewModel.toggleSourceSelection(obj.id.opaqueId)
-                                },
-                                headlineContent = { SingleLine(obj.name) },
-                                supportingContent = {
-                                    Text(
-                                        when (obj.type) {
-                                            CloudObjectType.FOLDER -> "Folder"
-                                            CloudObjectType.PROVIDER_NATIVE_DOCUMENT -> "Native document"
-                                            CloudObjectType.SHORTCUT -> "Shortcut"
-                                            CloudObjectType.FILE -> obj.size?.let(::formatBytes) ?: "File"
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                },
-                                leadingContent = {
-                                    Checkbox(
-                                        checked = obj.id.opaqueId in state.selectedSourceIds,
-                                        onCheckedChange = { viewModel.toggleSourceSelection(obj.id.opaqueId) },
-                                    )
-                                },
+                    WizardStep.PICK_SOURCE -> Column {
+                        BrowserBar(
+                            location = state.sourceLocation,
+                            canGoUp = state.sourcePath.isNotEmpty(),
+                            onUp = viewModel::sourceUp,
+                        )
+                        // The count, not the names: a selection can span
+                        // levels, so the rows proving it exists may be nowhere
+                        // on this screen. Without it, walking into a folder
+                        // looks exactly like losing what you picked.
+                        if (state.selectedSources.isNotEmpty()) {
+                            Text(
+                                "${state.selectedSources.size} selected",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
                             )
+                        }
+                        LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                            if (state.sourceChildren.isEmpty()) {
+                                item { EmptyNotice(state, "There is nothing here to transfer.") }
+                            }
+                            items(state.sourceChildren, key = { it.id.opaqueId }) { obj ->
+                                val isFolder = obj.type == CloudObjectType.FOLDER
+                                ListItem(
+                                    // A folder row opens; a file row toggles.
+                                    // The checkbox always toggles, so a folder
+                                    // can be taken whole without opening it.
+                                    modifier = Modifier.clickable {
+                                        if (isFolder) {
+                                            viewModel.openSourceFolder(obj)
+                                        } else {
+                                            viewModel.toggleSourceSelection(obj)
+                                        }
+                                    },
+                                    headlineContent = { SingleLine(obj.name) },
+                                    supportingContent = {
+                                        Text(
+                                            when (obj.type) {
+                                                CloudObjectType.FOLDER -> "Folder"
+                                                CloudObjectType.PROVIDER_NATIVE_DOCUMENT -> "Native document"
+                                                CloudObjectType.SHORTCUT -> "Shortcut"
+                                                CloudObjectType.FILE -> obj.size?.let(::formatBytes) ?: "File"
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    },
+                                    leadingContent = {
+                                        Checkbox(
+                                            checked = obj.id.opaqueId in state.selectedSources,
+                                            onCheckedChange = { viewModel.toggleSourceSelection(obj) },
+                                            // Named, because now that the row
+                                            // opens a folder rather than
+                                            // selecting it, this control is the
+                                            // only way to take one whole — and
+                                            // an unlabelled checkbox is one a
+                                            // screen reader cannot announce.
+                                            modifier = Modifier.semantics {
+                                                contentDescription = "Select ${obj.name}"
+                                            },
+                                        )
+                                    },
+                                    trailingContent = { if (isFolder) Text(">") },
+                                )
+                            }
                         }
                     }
 
-                    WizardStep.PICK_DESTINATION -> LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                        if (state.destinationChildren.isEmpty()) {
-                            item { EmptyNotice(state, "This account has no folder to transfer into.") }
+                    WizardStep.PICK_DESTINATION -> Column {
+                        BrowserBar(
+                            location = state.destinationLocation,
+                            canGoUp = state.destinationPath.isNotEmpty(),
+                            onUp = viewModel::destinationUp,
+                        )
+                        // No checkbox on the rows: the row that names a folder
+                        // is the row that opens it, so a control meaning
+                        // "select" would leave no way to look inside first.
+                        // The transfer lands where you are standing.
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Button(onClick = viewModel::chooseCurrentDestinationFolder) {
+                                Text("Choose this folder")
+                            }
+                            state.destinationFolderLabel?.let {
+                                Text(
+                                    "Into $it",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
-                        items(state.destinationChildren, key = { it.id.opaqueId }) { obj ->
-                            ListItem(
-                                modifier = Modifier.clickable {
-                                    viewModel.chooseDestinationFolder(obj.id.opaqueId)
-                                },
-                                headlineContent = { SingleLine(obj.name) },
-                                leadingContent = {
-                                    RadioButton(
-                                        selected = state.destinationFolderId == obj.id.opaqueId,
-                                        onClick = { viewModel.chooseDestinationFolder(obj.id.opaqueId) },
-                                    )
-                                },
-                            )
+                        LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                            if (state.destinationChildren.isEmpty()) {
+                                item { EmptyNotice(state, "This folder has no folders inside it.") }
+                            }
+                            items(state.destinationChildren, key = { it.id.opaqueId }) { obj ->
+                                ListItem(
+                                    modifier = Modifier.clickable { viewModel.openDestinationFolder(obj) },
+                                    headlineContent = { SingleLine(obj.name) },
+                                    trailingContent = { Text(">") },
+                                )
+                            }
                         }
                     }
 
@@ -200,6 +256,28 @@ fun NewTransferScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Where the browser is, and the way back out of it (§9).
+ *
+ * The location is shown because a browser that descends without saying where
+ * it went leaves "2026" on screen with nothing to say which 2026 it is — the
+ * demo tree alone has two folders that could be confused this way once you are
+ * one level down.
+ */
+@Composable
+private fun BrowserBar(location: String, canGoUp: Boolean, onUp: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (canGoUp) {
+            TextButton(onClick = onUp) { Text("Up") }
+        }
+        SingleLine(location, modifier = Modifier.weight(1f))
     }
 }
 
@@ -283,6 +361,26 @@ private fun Review(state: WizardState, viewModel: NewTransferViewModel) {
                 }
                 if (summary.unsupported > 0) ReviewRow("Will be skipped", formatCount(summary.unsupported))
                 if (summary.conflicts > 0) ReviewRow("In conflict", formatCount(summary.conflicts))
+            }
+        }
+
+        if (state.selectedSources.isNotEmpty()) {
+            // §24.2 asks the user to confirm before any byte moves, and counts
+            // alone cannot be confirmed: they say how much, never what. These
+            // are the §10 paths each root will be reproduced at inside the
+            // enclosing folder, which is also the one place the ancestors the
+            // browser walked through become visible.
+            Text(
+                state.destinationFolderLabel?.let { "What will be copied, into $it" }
+                    ?: "What will be copied",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            state.selectedSources.values.forEach { root ->
+                SingleLine(
+                    root.displayPath.toString(),
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
             }
         }
 

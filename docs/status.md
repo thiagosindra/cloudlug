@@ -1,4 +1,4 @@
-# Status — v0.4.2 (the first real transfer, and the two bugs in it)
+# Status — v0.4.2 (the first real transfer, and the three things in the way)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account** rather than against a fake that agrees with
@@ -21,6 +21,15 @@ there, "duplicate verified by hash". `upload_session/finish` answers with a
 though every route returned a union member. It turned its own success response
 into null (ADR-0030). §31.2 has the check that would have caught this on the
 first run; it is live-only, so CI has never run it.
+
+**And the picker could not descend.** Every row toggled selection and nothing
+opened a folder, so only an account's top level could be transferred: `photos`
+could be taken whole or not at all, and a file two levels down was unreachable.
+§9 describes a browser built on `listChildren` one level at a time, which
+implies descent without ever saying so, and §24.2 never said what a row does
+when you touch it — so the picker violated nothing. Both pickers now navigate,
+and the behaviour is written down as a §24.2 proposal in
+[`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) rather than left implied.
 
 This is the third defect in a row to live in a **handoff** rather than in a
 component, and the most expensive: the Dropbox contract suite is live-only,
