@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Nothing but a package to hang an instrumentation on. The application under
-  test is CloudLug, which this drives from outside; see build.gradle.kts.
--->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      Package visibility (API 30+), declared here rather than in the
+      androidTest manifest.
+
+      The instrumentation runs *in this application's process*, so the calling
+      package for a PackageManager query is `…cloudlug.recovery` and the
+      queries that count are the ones this installed app declares. Putting the
+      entry in src/androidTest only puts it in the test APK's manifest, which
+      is not what the platform consults: the second spike run had it there,
+      verified in the built test APK, and still got "No launch intent" with
+      CloudLug installed.
+    -->
+    <queries>
+        <package android:name="dev.thiagosindra.cloudlug" />
+    </queries>
+
     <application android:label="CloudLug recovery harness" />
 </manifest>
