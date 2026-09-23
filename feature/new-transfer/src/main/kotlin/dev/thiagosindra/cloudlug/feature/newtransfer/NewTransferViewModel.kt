@@ -15,8 +15,12 @@ import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.CloudObject
+import dev.thiagosindra.cloudlug.provider.CloudObjectId
+import dev.thiagosindra.cloudlug.provider.CloudProvider
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.provider.CloudSelection
+import dev.thiagosindra.cloudlug.provider.SelectionRoot
+import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
 import dev.thiagosindra.cloudlug.ui.providerLabel
@@ -43,10 +47,28 @@ data class WizardState(
     val accounts: List<ConnectedAccount> = emptyList(),
     val source: AccountId? = null,
     val destination: AccountId? = null,
+    /** Where the provider says this account's tree begins (ADR-0026). */
+    val sourceAccountRoot: CloudObjectId? = null,
+    /** The folders descended into, outermost first; empty at the account root. */
+    val sourcePath: List<CloudObject> = emptyList(),
     val sourceChildren: List<CloudObject> = emptyList(),
-    val selectedSourceIds: Set<String> = emptySet(),
+    /**
+     * Selected roots by object id, each carrying the display path §10 will
+     * reproduce at the destination.
+     *
+     * Keyed across the whole browse, not per level: §9 has the user descend one
+     * level at a time, and a selection that evaporated on the way down would
+     * make choosing two folders in different places impossible. Insertion
+     * order is kept, so the review step lists them in the order they were
+     * picked.
+     */
+    val selectedSources: Map<String, SelectionRoot> = emptyMap(),
+    val destinationAccountRoot: CloudObjectId? = null,
+    val destinationPath: List<CloudObject> = emptyList(),
     val destinationChildren: List<CloudObject> = emptyList(),
     val destinationFolderId: String? = null,
+    /** The chosen destination folder as the user saw it, for §24.2's review. */
+    val destinationFolderLabel: String? = null,
     val networkPolicy: TransferNetworkPolicy = TransferNetworkPolicy.UNMETERED_ONLY,
     val summary: ManifestSummary? = null,
     val transferId: TransferId? = null,
@@ -83,6 +105,31 @@ data class WizardState(
         return "${name(source)} -> ${name(destination)}"
     }
 
+    /** Where the browser is, as a path a person can read. */
+    val sourceLocation: String get() = locationOf(sourcePath)
+
+    val destinationLocation: String get() = locationOf(destinationPath)
+
+    /**
+     * The object whose children are on screen: the deepest folder descended
+     * into, or the account root before any descent.
+     */
+    val destinationHere: CloudObjectId? get() = destinationPath.lastOrNull()?.id ?: destinationAccountRoot
+
+    /**
+     * Where [obj] lands under the enclosing folder (§10).
+     *
+     * `CloudObject` carries identity, not a path (§6), so nothing below the UI
+     * can work this out. The browser knows it because it walked here, which is
+     * the whole reason `SelectionRoot` carries the path as data rather than the
+     * engine resolving it (ADR-0014, overruled).
+     */
+    fun displayPathOf(obj: CloudObject): CloudPath =
+        sourcePath.fold(CloudPath.ROOT) { path, ancestor -> path.child(ancestor.name) }.child(obj.name)
+
+    private fun locationOf(path: List<CloudObject>): String =
+        if (path.isEmpty()) "/" else path.joinToString("/", prefix = "/") { it.name }
+
     fun providerOf(account: AccountId): ProviderType? =
         accounts.firstOrNull { it.account.id == account }?.account?.provider
 
@@ -90,7 +137,7 @@ data class WizardState(
         get() = when (step) {
             WizardStep.SOURCE -> source != null
             WizardStep.DESTINATION -> destination != null
-            WizardStep.PICK_SOURCE -> selectedSourceIds.isNotEmpty()
+            WizardStep.PICK_SOURCE -> selectedSources.isNotEmpty()
             WizardStep.PICK_DESTINATION -> destinationFolderId != null
             WizardStep.REVIEW -> summary != null && !busy
             WizardStep.STARTED -> false
@@ -147,35 +194,121 @@ class NewTransferViewModel @Inject constructor(
 
     fun chooseDestination(account: AccountId) {
         _state.update { it.copy(destination = account, step = WizardStep.PICK_SOURCE) }
-        browseSource()
+        browseSource(emptyList())
     }
 
-    private fun browseSource() = viewModelScope.launch {
+    // ------------------------------------------------------- §9's browser
+    //
+    // Both pickers descend. Before this, every row toggled selection and
+    // nothing opened a folder, so only the account's top level could be
+    // transferred at all — §9 describes a browser built on listChildren one
+    // level at a time, and a browser that cannot descend is a list.
+
+    /** Lists [path]'s deepest folder, or the account root when it is empty. */
+    private fun browseSource(path: List<CloudObject>) = viewModelScope.launch {
         val account = _state.value.source ?: return@launch
         _state.update { it.copy(busy = true, error = null) }
-        runCatching { childrenOfRoot(account) }
-            .onSuccess { children -> _state.update { it.copy(sourceChildren = children, busy = false) } }
-            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(account, failure)) } }
-    }
-
-    fun toggleSourceSelection(objectId: String) {
-        _state.update {
-            val next = it.selectedSourceIds.toMutableSet()
-            if (!next.add(objectId)) next.remove(objectId)
-            it.copy(selectedSourceIds = next)
+        runCatching {
+            val provider = providerFor(account)
+            val root = provider.rootOf(account)
+            root to provider.listChildren(account, path.lastOrNull()?.id ?: root).toList()
+        }.onSuccess { (root, children) ->
+            _state.update {
+                it.copy(
+                    sourceAccountRoot = root,
+                    sourcePath = path,
+                    sourceChildren = children,
+                    busy = false,
+                )
+            }
+        }.onFailure { failure ->
+            _state.update { it.copy(busy = false, error = browseFailure(account, failure)) }
         }
     }
 
-    fun toDestinationPicker() = viewModelScope.launch {
-        val account = _state.value.destination ?: return@launch
-        _state.update { it.copy(step = WizardStep.PICK_DESTINATION, busy = true, error = null) }
-        runCatching { childrenOfRoot(account).filter { it.type == CloudObjectType.FOLDER } }
-            .onSuccess { folders -> _state.update { it.copy(destinationChildren = folders, busy = false) } }
-            .onFailure { failure -> _state.update { it.copy(busy = false, error = browseFailure(account, failure)) } }
+    fun openSourceFolder(folder: CloudObject) {
+        if (folder.type != CloudObjectType.FOLDER) return
+        browseSource(_state.value.sourcePath + folder)
     }
 
-    fun chooseDestinationFolder(objectId: String) {
-        _state.update { it.copy(destinationFolderId = objectId) }
+    fun sourceUp() {
+        val path = _state.value.sourcePath
+        if (path.isEmpty()) return
+        browseSource(path.dropLast(1))
+    }
+
+    /**
+     * Adds or removes [obj] as a root, recording where it was found.
+     *
+     * The display path is captured here rather than at `review()` because here
+     * is where it is known: by the time the user is on the review step the
+     * browser may be somewhere else entirely, and the object's ancestors are
+     * not recoverable from the object (§6).
+     */
+    fun toggleSourceSelection(obj: CloudObject) {
+        _state.update { state ->
+            val next = state.selectedSources.toMutableMap()
+            val key = obj.id.opaqueId
+            if (next.remove(key) == null) next[key] = SelectionRoot(obj, state.displayPathOf(obj))
+            state.copy(selectedSources = next)
+        }
+    }
+
+    fun toDestinationPicker() {
+        _state.update { it.copy(step = WizardStep.PICK_DESTINATION) }
+        browseDestination(emptyList())
+    }
+
+    private fun browseDestination(path: List<CloudObject>) = viewModelScope.launch {
+        val account = _state.value.destination ?: return@launch
+        _state.update { it.copy(busy = true, error = null) }
+        runCatching {
+            val provider = providerFor(account)
+            val root = provider.rootOf(account)
+            // Only folders: §10 puts the enclosing folder inside whatever is
+            // chosen here, so a file is not a place a transfer can land.
+            root to provider.listChildren(account, path.lastOrNull()?.id ?: root)
+                .toList()
+                .filter { it.type == CloudObjectType.FOLDER }
+        }.onSuccess { (root, folders) ->
+            _state.update {
+                it.copy(
+                    destinationAccountRoot = root,
+                    destinationPath = path,
+                    destinationChildren = folders,
+                    busy = false,
+                )
+            }
+        }.onFailure { failure ->
+            _state.update { it.copy(busy = false, error = browseFailure(account, failure)) }
+        }
+    }
+
+    fun openDestinationFolder(folder: CloudObject) {
+        if (folder.type != CloudObjectType.FOLDER) return
+        browseDestination(_state.value.destinationPath + folder)
+    }
+
+    fun destinationUp() {
+        val path = _state.value.destinationPath
+        if (path.isEmpty()) return
+        browseDestination(path.dropLast(1))
+    }
+
+    /**
+     * Chooses the folder currently open, rather than one selected in the list.
+     *
+     * A destination is one place, and the row that names it is also the row
+     * that opens it — a control that meant "select" would leave no way to look
+     * inside before committing to it. Choosing the level you are standing on
+     * removes the ambiguity, and makes the account root choosable, which it
+     * has to be: §10 creates its own enclosing folder inside whatever this is.
+     */
+    fun chooseCurrentDestinationFolder() {
+        _state.update {
+            val here = it.destinationHere ?: return@update it
+            it.copy(destinationFolderId = here.opaqueId, destinationFolderLabel = it.destinationLocation)
+        }
     }
 
     fun setNetworkPolicy(policy: TransferNetworkPolicy) {
@@ -228,10 +361,14 @@ class NewTransferViewModel @Inject constructor(
             )
             created = transfer.id
 
-            val roots = current.sourceChildren.filter { it.id.opaqueId in current.selectedSourceIds }
+            // The selection itself, with the display paths the browser
+            // recorded. `CloudSelection.of` is the flat-picker helper: it names
+            // every root by its own name alone, which would land
+            // photos/2025/July at the destination as plain "July" and lose the
+            // ancestors §10 preserves.
             val summary = controller.prepare(
                 transfer.id,
-                CloudSelection.of(source, roots),
+                CloudSelection(source, current.selectedSources.values.toList()),
             )
             transfer.id to summary
         }.onSuccess { (id, summary) ->
@@ -258,6 +395,19 @@ class NewTransferViewModel @Inject constructor(
     }
 
     fun back() {
+        // Inside a folder, back means up — the same thing the Up control does.
+        // Leaving the step is what back means only at the top of the tree,
+        // which is where the user began.
+        val current = _state.value
+        if (current.step == WizardStep.PICK_SOURCE && current.sourcePath.isNotEmpty()) {
+            sourceUp()
+            return
+        }
+        if (current.step == WizardStep.PICK_DESTINATION && current.destinationPath.isNotEmpty()) {
+            destinationUp()
+            return
+        }
+
         _state.update {
             it.copy(
                 step = when (it.step) {
@@ -273,25 +423,22 @@ class NewTransferViewModel @Inject constructor(
     }
 
     /**
-     * Asks the provider where its root is rather than guessing (ADR-0026).
+     * The adapter serving [account], or a failure the caller turns into a
+     * visible message.
      *
-     * A failure here is not caught: an empty picker and a provider that threw
-     * look identical to the user, and this screen spent v0.2 reporting the
-     * second as the first. The callers above turn it into a visible message.
-     */
-    /**
-     * Lists one account's root.
+     * A failure here is deliberately not swallowed: an empty picker and a
+     * provider that threw look identical to the user, and this screen spent
+     * v0.2 reporting the second as the first.
      *
-     * No longer calls `authenticate()` to discover an account id: the account
-     * was chosen in step 1 or 2 and is already recorded in §12.4. That call
-     * cost a network round trip per step and, with two accounts of one
-     * provider connected, could not have said which of them this is.
+     * No `authenticate()` call: the account was chosen in step 1 or 2 and is
+     * already recorded in §12.4. That call cost a round trip per step and,
+     * with two accounts of one provider connected, could not have said which
+     * of them this is.
      */
-    private suspend fun childrenOfRoot(account: AccountId): List<CloudObject> {
+    private fun providerFor(account: AccountId): CloudProvider {
         val type = _state.value.providerOf(account)
             ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "that account is no longer connected")
-        val provider = providers.provider(type)
-        return provider.listChildren(account, provider.rootOf(account)).toList()
+        return providers.provider(type)
     }
 
     private fun browseFailure(account: AccountId, failure: Throwable): String = when {

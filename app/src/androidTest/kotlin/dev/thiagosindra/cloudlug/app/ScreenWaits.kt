@@ -6,7 +6,9 @@ import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.ComposeTestRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 
 /**
@@ -54,6 +56,26 @@ fun ComposeTestRule.awaitText(text: String, timeoutMillis: Long = 20_000) {
 fun ComposeTestRule.node(text: String): SemanticsNodeInteraction {
     awaitText(text)
     return onNodeWithText(text, useUnmergedTree = true)
+}
+
+/**
+ * Waits for a node labelled [description], then returns it for clicking.
+ *
+ * The source picker's checkbox carries no text — it is a checkbox — and since
+ * the row it sits on now opens a folder rather than selecting it, the checkbox
+ * is the only way to take a folder whole. So a test has to be able to aim at it.
+ */
+fun ComposeTestRule.labelled(description: String): SemanticsNodeInteraction {
+    try {
+        waitUntil(20_000) {
+            onAllNodesWithContentDescription(description, substring = true, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+    } catch (timeout: ComposeTimeoutException) {
+        throw AssertionError(diagnose(description), timeout)
+    }
+    return onNodeWithContentDescription(description, useUnmergedTree = true)
 }
 
 /** Every string the screen is currently drawing, flattened. */
