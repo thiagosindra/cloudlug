@@ -206,7 +206,10 @@ jobs:
           # :core:security too, because §8.3's guarantees are about Android
           # Keystore and Keystore exists only on a device. A JVM test there
           # could only exercise a fake, which would verify nothing.
-          script: ./gradlew :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest --stacktrace
+          # SPIKE: proves the recovery harness can force-stop CloudLug and
+          # survive it. :app:installDebug first, because the harness
+          # instruments itself and so installs only its own two APKs.
+          script: ./gradlew :app:installDebug :tools:recovery-test:connectedDebugAndroidTest --stacktrace
 
       - name: Upload instrumentation reports
         if: failure()
