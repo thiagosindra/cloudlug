@@ -7,7 +7,7 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import org.junit.Test
 import org.junit.runner.RunWith
-import kotlin.test.assertFalse
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -44,8 +44,14 @@ class ProcessDeathHarnessTest {
 
         // The assertion that matters is that this line runs at all: from inside
         // :app's androidTest, the force-stop above would have ended the run.
-        assertFalse(
-            runningProcesses().contains(CLOUDLUG),
+        //
+        // `pidof`, not a substring of `ps`. This harness's own package is
+        // `…cloudlug.recovery`, which *contains* `…cloudlug`, so scanning the
+        // process list for the name found the harness itself and reported that
+        // CloudLug had survived being killed. `pidof` takes the exact name.
+        assertEquals(
+            "",
+            device.executeShellCommand("pidof $CLOUDLUG").trim(),
             "force-stop left a $CLOUDLUG process behind, so the kill this suite depends on did not happen",
         )
 
@@ -65,8 +71,6 @@ class ProcessDeathHarnessTest {
         }
         instrumentation.targetContext.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
     }
-
-    private fun runningProcesses(): String = device.executeShellCommand("ps -A")
 
     private companion object {
         const val CLOUDLUG = "dev.thiagosindra.cloudlug"
