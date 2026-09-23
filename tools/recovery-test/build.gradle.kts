@@ -30,6 +30,23 @@ android {
     }
 }
 
+/*
+ * CloudLug has to be on the device before the harness looks for it.
+ *
+ * Nothing connects the two otherwise — this module does not depend on :app,
+ * deliberately, since it drives it from outside — so Gradle is free to run the
+ * test and the install in parallel. It did: the first spike run started the
+ * test three seconds before `:app:installDebug` finished, and the harness
+ * failed with "No launch intent", which is exactly what an uninstalled package
+ * looks like. Declaring it here rather than in CI's script means anyone running
+ * the task by hand gets the same ordering.
+ */
+// `matching`, not `named`: AGP registers the connected-test task while
+// creating variants, which is after this script is evaluated.
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    dependsOn(":app:installDebug")
+}
+
 dependencies {
     androidTestImplementation(kotlin("test"))
     androidTestImplementation(libs.androidx.test.runner)
