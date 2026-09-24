@@ -15,6 +15,7 @@ import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.TransferItemStatus
 import dev.thiagosindra.cloudlug.provider.CloudDownload
 import dev.thiagosindra.cloudlug.provider.CloudObject
+import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.CloudProvider
 import dev.thiagosindra.cloudlug.provider.Chunk
@@ -85,7 +86,13 @@ class FileTransferWorker(
         return try {
             when (item.objectKind) {
                 CloudObjectType.FOLDER -> createFolder(transfer, item, destination, destinationParentId)
-                CloudObjectType.FILE -> transferFile(transfer, item, source, destination, destinationParentId)
+                CloudObjectType.FILE -> transferFileRestartingOnce(
+                    transfer,
+                    item,
+                    source,
+                    destination,
+                    destinationParentId,
+                )
                 // Manifest-time classification already settled these (§20.1, §20.2).
                 else -> repository.transitionItem(
                     item.id,
@@ -128,6 +135,42 @@ class FileTransferWorker(
             TransferItemStatus.COMPLETED,
             ItemStatusReason.VERIFIED_BY_DESTINATION_HASH,
         )
+    }
+
+    /**
+     * Spec §22.5, for a session that dies **while** the file is in flight.
+     *
+     * [RetryExecutor] raises [UploadSessionRestartException] rather than
+     * returning, because a session that cannot be continued is not something a
+     * backoff fixes. Nothing caught it, so it unwound past `TransferEngine`'s
+     * own handler — which re-throws anything that is not a [CloudException] —
+     * and ended the whole transfer over one file.
+     *
+     * One more pass, from where a recovery would have put the item. A second
+     * failure is the item's and settles it.
+     */
+    private suspend fun transferFileRestartingOnce(
+        transfer: TransferEntity,
+        item: TransferItemEntity,
+        source: CloudProvider,
+        destination: CloudProvider,
+        destinationParentId: CloudObjectId,
+    ): TransferItemEntity = try {
+        transferFile(transfer, item, source, destination, destinationParentId)
+    } catch (restart: UploadSessionRestartException) {
+        // §22.2 aborts the session *under* a worker that is still mid-file, so
+        // a cancelled file arrives here looking exactly like an expired one.
+        // A settled item is the user's decision and is never restarted
+        // (ADR-0027); `TransferEngine` re-reads the row and moves on.
+        val current = repository.findItem(item.id)
+        if (current == null || current.status.isTerminal) throw restart
+
+        repository.recordUploadSession(item.id, null)
+        repository.recordUploadProgress(item.id, 0L)
+        val requeued = repository.transitionItem(item.id, TransferItemStatus.PENDING) {
+            it.copy(lastErrorCode = "upload_session_restart", lastErrorMessage = restart.message)
+        }
+        transferFile(transfer, requeued, source, destination, destinationParentId)
     }
 
     private suspend fun transferFile(
@@ -296,9 +339,30 @@ class FileTransferWorker(
         val chunkSize = destination.capabilities.alignChunkSize(cachePolicy.networkChunkBytes).toInt()
         val hashPipeline = DualHashPipeline(destination.capabilities.nativeHashAlgorithm)
 
-        var session = beginOrResumeUpload(transfer, item, destination, destinationParentId)
+        val request = uploadRequestFor(transfer, item, destination, destinationParentId)
+        var session = beginOrResumeUpload(item, destination, request)
         var acknowledged = retries.execute(item.id, "queryUpload") { destination.queryUpload(session) }
             .acknowledgedBytes
+
+        // §22.5: never continue into a partially written destination object.
+        //
+        // This pass starts at byte zero — it has to, because §19.4 computes
+        // both hashes in the one pass that reads the object — so a session the
+        // destination has already taken bytes into cannot accept what comes
+        // next. Dropbox answers such a chunk with `incorrect_offset`, which
+        // §23 maps to UPLOADING_SESSION_EXPIRED and RetryExecutor raises as
+        // UploadSessionRestartException — an exception nothing catches, which
+        // ends the whole transfer rather than the file. That is the shape a
+        // resume after process death takes every time, because the session id
+        // is on the row and outlives the process that opened it.
+        //
+        // So it is abandoned here, where the offset is known, rather than
+        // discovered three calls later by a provider saying no.
+        if (acknowledged > 0L) {
+            abandonUpload(item, destination, session)
+            session = beginUpload(item, destination, request)
+            acknowledged = 0L
+        }
 
         val download = retries.execute(item.id, "openDownload") {
             source.openDownload(transfer.sourceAccountId, CloudObjectId(source.type, item.sourceObjectId))
@@ -354,27 +418,63 @@ class FileTransferWorker(
         return MovedBytes(session, hashPipeline.finish(), offset)
     }
 
-    private suspend fun beginOrResumeUpload(
+    private fun uploadRequestFor(
         transfer: TransferEntity,
         item: TransferItemEntity,
         destination: CloudProvider,
         destinationParentId: CloudObjectId,
+    ) = UploadRequest(
+        account = transfer.destinationAccountId,
+        parent = destinationParentId,
+        name = item.filename,
+        size = item.size,
+        mimeType = item.mimeType,
+        modifiedAt = item.modifiedAt.takeIf { destination.capabilities.supportsModifiedTimeWrite },
+    )
+
+    private suspend fun beginOrResumeUpload(
+        item: TransferItemEntity,
+        destination: CloudProvider,
+        request: UploadRequest,
     ): UploadSession {
-        val request = UploadRequest(
-            account = transfer.destinationAccountId,
-            parent = destinationParentId,
-            name = item.filename,
-            size = item.size,
-            mimeType = item.mimeType,
-            modifiedAt = item.modifiedAt.takeIf { destination.capabilities.supportsModifiedTimeWrite },
-        )
         val existing = item.uploadSessionId
         if (existing != null && item.uploadSessionExpiresAt?.isBefore(clock.instant()) != true) {
             return UploadSession(existing, request, item.uploadSessionMetadata, item.uploadSessionExpiresAt)
         }
+        return beginUpload(item, destination, request)
+    }
+
+    private suspend fun beginUpload(
+        item: TransferItemEntity,
+        destination: CloudProvider,
+        request: UploadRequest,
+    ): UploadSession {
         val session = retries.execute(item.id, "beginUpload") { destination.beginUpload(request.account, request) }
         repository.recordUploadSession(item.id, session.id, session.providerMetadata, session.expiresAt)
         return session
+    }
+
+    /**
+     * Drops a session whose bytes this pass cannot continue from.
+     *
+     * The abort is best-effort: the session is being discarded either way, and
+     * a provider that has already forgotten it answers the abort with the same
+     * error it would answer everything else with. What must happen is the row
+     * losing the session id, so nothing resumes into it again.
+     */
+    private suspend fun abandonUpload(
+        item: TransferItemEntity,
+        destination: CloudProvider,
+        session: UploadSession,
+    ) {
+        try {
+            destination.abortUpload(session)
+        } catch (ignored: CloudException) {
+            // Recorded on the item by the retry executor's own bookkeeping if
+            // it ever matters; there is nothing to do about it here.
+        }
+        repository.recordUploadSession(item.id, null)
+        repository.recordUploadProgress(item.id, 0L)
     }
 
     private suspend fun uploadChunk(

@@ -21,6 +21,7 @@ import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.provider.CloudSelection
 import dev.thiagosindra.cloudlug.provider.SelectionRoot
 import dev.thiagosindra.cloudlug.model.CloudPath
+import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
 import dev.thiagosindra.cloudlug.ui.providerLabel
@@ -157,6 +158,7 @@ class NewTransferViewModel @Inject constructor(
     private val repository: TransferRepository,
     private val providers: ProviderRegistry,
     private val accounts: AccountRepository,
+    private val scheduler: TransferScheduler,
     private val clock: Clock,
 ) : ViewModel() {
 
@@ -387,10 +389,17 @@ class NewTransferViewModel @Inject constructor(
         }
     }
 
-    /** Step 6. */
+    /**
+     * Step 6: hand the transfer to the platform (§17).
+     *
+     * Not `controller.start`, which runs in an app-scoped coroutine and dies
+     * with the process. Going through the scheduler means the path a user takes
+     * is the path that ships — and the emulator journey exercises it, rather
+     * than a second one that nothing tests.
+     */
     fun start() = viewModelScope.launch {
         val id = _state.value.transferId ?: return@launch
-        controller.start(id)
+        scheduler.enqueue(id)
         _state.update { it.copy(step = WizardStep.STARTED) }
     }
 

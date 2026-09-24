@@ -19,6 +19,8 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,10 +59,23 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
+            // The label has to be said twice, and that is not redundancy.
+            //
+            // A FAB merges its descendants, and the merged node reaches the
+            // accessibility tree carrying neither text nor a description — so
+            // §24.1's primary action is exported as a clickable rectangle with
+            // no name, and a screen reader announces it as an unlabelled
+            // button. `Accounts` above does not have this problem only because
+            // a TextButton publishes its child TextView separately.
+            //
+            // Found by §31.4's harness, which drives CloudLug from another
+            // process and so sees exactly what TalkBack sees, rather than the
+            // semantics tree `:app`'s own tests read.
             ExtendedFloatingActionButton(
                 onClick = onNewTransfer,
                 text = { Text("New Transfer") },
                 icon = {},
+                modifier = Modifier.semantics { contentDescription = "New Transfer" },
             )
         },
     ) { padding ->

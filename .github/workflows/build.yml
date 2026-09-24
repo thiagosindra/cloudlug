@@ -1,9 +1,21 @@
 name: build
 
 on:
+  # `main` only, not every branch. A branch with a pull request open was
+  # matching both triggers, so every push to one ran the whole workflow
+  # twice — two emulator boots, ~40 minutes, for one commit. The pull_request
+  # trigger below covers branches, which is where the checks are read.
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
+
+# One run per ref. Pushing a fix while the previous commit's emulator is still
+# booting used to leave both running to completion, and the older one's result
+# is worthless the moment it exists: four superseded runs went the full
+# distance in a single evening.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -184,7 +196,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run the smoke test on an emulator
+      - name: Run the instrumented tests on an emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           # `default`, not `google_apis`: CloudLug uses no Play services at all
@@ -203,10 +215,34 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 300
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          # :core:security too, because §8.3's guarantees are about Android
-          # Keystore and Keystore exists only on a device. A JVM test there
-          # could only exercise a fake, which would verify nothing.
-          script: ./gradlew :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest --stacktrace
+          # Three suites, because each needs a device for a different reason.
+          # :app is the §31.3 journey. :core:security, because §8.3's
+          # guarantees are about Android Keystore and Keystore exists only on
+          # a device — a JVM test there could only exercise a fake, which
+          # would verify nothing. :tools:recovery-test is the §31.4 harness:
+          # it force-stops CloudLug and survives it, which a test living
+          # inside CloudLug's own process cannot do. That module declares its
+          # own dependency on :app:installDebug, because it instruments
+          # itself and so would otherwise install only its own two APKs.
+          # No --stacktrace. On a test failure Gradle prints ~140 lines of
+          # its own executor internals, which pushes the instrumentation's
+          # actual message out of any readable tail of the log — two spike
+          # runs were spent unable to see why a single assertion failed. The
+          # step below prints the result XML instead, which is the part that
+          # says something.
+          # --continue: the three suites are independent, and booting an
+          # emulator costs eight minutes. Without it the first failure hides
+          # whatever the other two would have said, which on the run that
+          # added :tools:recovery-test meant learning nothing at all about the
+          # two scenarios it exists for.
+          script: ./gradlew --continue :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest :tools:recovery-test:connectedDebugAndroidTest
+
+      - name: Print the instrumentation results
+        if: failure()
+        run: |
+          # The one thing worth reading when a device test fails.
+          find . -path '*androidTest-results*' -name '*.xml' -print -exec cat {} \; | head -200
+          find . -path '*androidTests/connected*' -name '*.txt' -print -exec cat {} \; | head -100
 
       - name: Upload instrumentation reports
         if: failure()
@@ -214,6 +250,7 @@ jobs:
         with:
           name: test-reports-instrumented
           path: |
+            tools/recovery-test/build/reports/androidTests/**
             app/build/reports/androidTests/**
             app/build/outputs/androidTest-results/**
             core/security/build/reports/androidTests/**

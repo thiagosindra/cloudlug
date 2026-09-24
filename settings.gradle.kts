@@ -38,6 +38,7 @@ include(
 include(":tools:dropbox-hash-check")
 include(":tools:dropbox-auth")
 include(":tools:dropbox-capture")
+include(":tools:recovery-test")
 
 // Android modules from spec §4 and the §24 screens.
 include(
@@ -45,6 +46,7 @@ include(
     ":core:auth",
     ":core:security",
     ":core:ui",
+    ":core:scheduling",
     ":feature:accounts",
     ":feature:home",
     ":feature:new-transfer",

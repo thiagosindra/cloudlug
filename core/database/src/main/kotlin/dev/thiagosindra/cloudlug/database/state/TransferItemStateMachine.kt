@@ -40,7 +40,8 @@ class IllegalItemTransitionException(
  *  - UPLOADING -> CACHED is how an expired upload session restarts from cached
  *    chunks rather than from a partially written destination object (§22.5).
  *  - Recovery after process death re-queues active items; see
- *    [recoveryStatusFor].
+ *    [recoveryStatusFor]. Every active status can reach PENDING, because that
+ *    is where recovery sends them.
  *  - Retry (§22.4) returns FAILED, CANCELLED, SOURCE_CHANGED and CONFLICT to
  *    PENDING. CONFLICT is included because §13.2 says the user may retry after
  *    removing the destination object. COMPLETED and the SKIPPED_* states are
@@ -62,9 +63,13 @@ object TransferItemStateMachine {
             CANCELLED,
         ),
         DOWNLOADING to setOf(CACHED, SOURCE_CHANGED, PENDING, FAILED, CANCELLED),
-        CACHED to setOf(UPLOADING, FAILED, CANCELLED),
-        UPLOADING to setOf(VERIFYING, CACHED, FAILED, CANCELLED),
-        VERIFYING to setOf(COMPLETED, FAILED, CANCELLED),
+        // PENDING on each of the three below is recovery after process death,
+        // and it is the only way back: the engine restarts an item from
+        // CHECKING_DESTINATION, which none of these can reach directly. See
+        // [recoveryStatusFor].
+        CACHED to setOf(UPLOADING, PENDING, FAILED, CANCELLED),
+        UPLOADING to setOf(VERIFYING, CACHED, PENDING, FAILED, CANCELLED),
+        VERIFYING to setOf(COMPLETED, PENDING, FAILED, CANCELLED),
         // Terminal states (§32.9). Only "retry incomplete files" leaves them.
         COMPLETED to emptySet(),
         SKIPPED_DUPLICATE to emptySet(),
@@ -92,15 +97,26 @@ object TransferItemStateMachine {
      * Where an item that was mid-flight when the process died should resume
      * from (spec §2.4, §31.4).
      *
-     * Downloading and destination checks restart from PENDING — cached chunks
-     * survive, so this re-queues work rather than repeating it. An item that was
-     * uploading drops back to CACHED so the engine re-queries the upload session
-     * before sending anything (§22.5). Verification is a metadata comparison and
-     * is simply repeated. Terminal and idle items are left alone.
+     * **Every active status goes back to PENDING**, because the engine's unit
+     * of resume is the item: `FileTransferWorker` restarts a file at
+     * CHECKING_DESTINATION and re-reads it from byte zero, since §19.4 computes
+     * both hashes in the single pass that reads the object and a half-built
+     * hash cannot be resumed from anywhere.
+     *
+     * This used to send UPLOADING to CACHED, reading §22.5's "restarts from its
+     * cached chunks" as a state the engine could re-enter. It could not: CACHED
+     * cannot reach CHECKING_DESTINATION, so an item that was uploading when the
+     * process died threw [IllegalItemTransitionException] on the next run and
+     * took the whole transfer down with it. VERIFYING was worse — left
+     * untouched, and equally unable to restart.
+     *
+     * Re-running an item is safe rather than wasteful: §19.2's idempotency
+     * record and §19.3's destination check both run before any byte moves, so
+     * an item whose bytes did land settles as SKIPPED_DUPLICATE instead of
+     * being sent twice. Terminal and idle items are left alone.
      */
     fun recoveryStatusFor(status: TransferItemStatus): TransferItemStatus = when (status) {
-        CHECKING_DESTINATION, DOWNLOADING -> PENDING
-        UPLOADING -> CACHED
+        CHECKING_DESTINATION, DOWNLOADING, CACHED, UPLOADING, VERIFYING -> PENDING
         else -> status
     }
 }

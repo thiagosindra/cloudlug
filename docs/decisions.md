@@ -851,3 +851,133 @@ have carried the answer. The failed-item row now shows the message.
 
 **What changes it.** If Dropbox ever tags its struct responses, `assume` stops
 being consulted and nothing else moves.
+
+---
+
+## ADR-0031 — The scheduler wraps the engine; it does not become it
+
+**Status.** Accepted in v0.5, pending spec ratification.
+
+**Context.** §17 names two platform mechanisms — a User-Initiated Data Transfer
+job on API 34+, a WorkManager worker with a `dataSync` foreground service on
+26–33 — and then says correctness must never depend on either staying alive.
+Before v0.5 the engine ran in an application-scoped coroutine started by a
+ViewModel, which is the one arrangement that makes that sentence false: the
+transfer died with the process, and the process dies whenever Android wants the
+memory.
+
+**Decision.** A four-layer split, with the platform confined to the top one.
+
+`SchedulingPolicy`, in `core:transfer`, decides *what* — which transfers have
+work left, and which network each needs — over persisted rows and nothing else.
+It is pure Kotlin and is where the §16 and §13.1 reasoning is tested.
+
+`TransferScheduler`, in the new `core:scheduling`, is a three-method interface:
+`enqueue`, `cancel`, `reconcile`. Two implementations, chosen once by API level
+in a Hilt module; neither knows the other exists.
+
+`TransferRunner`, also in `core:scheduling`, is what both jobs actually call. It
+runs the transfer through the existing `TransferController` and keeps §24.4's
+notification current from the database rather than from the engine, so what the
+notification says is what a screen would say.
+
+`TransferController` and `TransferEngine` are unchanged in kind. The controller
+gained a suspending `run` that the calling coroutine owns, so a job's
+cancellation is the transfer's cancellation; its existing fire-and-forget
+`start` remains for the in-app path the §31.3 journey test drives.
+
+**Why not replace the controller.** The emulator journey is the only test that
+runs the engine, the §24 screens and a real database together, and it takes a
+transfer from the wizard to a verified completion in one process. Routing it
+through WorkManager would have made it a test of WorkManager. The scheduler
+wraps the controller instead, so the same engine runs both ways and the journey
+keeps testing what it was written to test.
+
+**Why `reconcile` rather than remembering.** Neither scheduler holds state.
+Recovery after process death or reboot is `SchedulingPolicy.toEnqueue` over the
+rows, run on boot and on every app start. `enqueue` is idempotent by
+construction — WorkManager's `KEEP`, JobScheduler's id-per-transfer — so
+reconciling a transfer that is already running does nothing.
+
+**Where the platform leaked anyway, and what it cost.** Three times, each caught
+by something other than a unit test.
+
+The network constraint is enforced by the platform, which stops the job by
+cancelling the worker's coroutine — identical, from the engine's side, to a
+pause. The row was left saying `RUNNING`. Whatever stops a job now records why
+before unwinding, checked against §16's own gate rather than against a stop
+reason API 30 does not supply.
+
+The worker then reported success, so WorkManager considered the work finished
+and nothing re-applied the constraint. `WAITING_FOR_WIFI` now returns
+`Result.retry()`: the retry *is* the constraint being re-applied, and
+WorkManager's ten-second backoff floor is not a cool-down but how soon after
+Wi-Fi returns the transfer picks up.
+
+And a foreground notification dies with its worker, which is precisely when a
+parked transfer still owes the user an explanation (§24.4). A parked transfer
+is re-posted as an ordinary notification that outlives the job.
+
+**What changes it.** A platform that runs long transfers without a job — or one
+where `reconcile` becomes expensive enough to need an index rather than a scan
+— would change the top layer only. Nothing below `TransferScheduler` names a
+platform type.
+
+---
+
+## ADR-0032 — Process death is not pause, and the tests only knew pause
+
+**Status.** Accepted in v0.5.
+
+**Context.** §31.4's first four scenarios begin "kill the process". None of them
+had ever been run. CloudLug's own `androidTest` cannot: instrumentation loads
+into the process of the package it targets, so `am force-stop` from `:app`'s
+tests takes the test down with the app and the run reports a crashed
+instrumentation rather than a result. The JVM tests could not either — a
+`TestScope` cannot be killed, and cancelling one *is* the pause case.
+
+So what stood in for process death everywhere was pause. A pause unwinds: the
+coroutine is cancelled, every `finally` runs, and the rows are left describing a
+transfer that stopped tidily. Death leaves whatever happened to be written at
+the instant the process went away.
+
+**Decision.** Two harnesses, because the gap has two halves.
+
+`tools/recovery-test` is an empty application that instruments **itself** and
+drives CloudLug from outside through UiAutomator. Force-stopping CloudLug is
+then an ordinary thing that happens to another package, and the assertions run
+in a process that was never touched. It carries §31.4's first scenario and §16's
+network-policy hold, which needs the same vantage point for the same reason: the
+notification shade belongs to the system UI, not to the app.
+
+`core/transfer`'s `ProcessDeathRecoveryTest` writes the rows death would have
+left and runs the engine against them. Not a substitute for the device test —
+it cannot prove the platform restarts anything — but it is where a specific
+interrupted state can be named, and the two defects below are states, not
+timings.
+
+**What it found.** Recovery sent an interrupted upload to `CACHED` and left
+`VERIFYING` alone, reading §22.5's "restarts from its cached chunks" as a state
+the engine could re-enter. It cannot: a file begins at `CHECKING_DESTINATION`,
+which neither can reach, so the next run threw `IllegalItemTransitionException`
+and ended the transfer. And the upload session recorded on the row outlived the
+process, while the pass that resumes reads from byte zero — §19.4 computes both
+hashes in it — so the first chunk went to a session already holding bytes and
+came back `incorrect_offset`.
+
+Every active state now recovers to `PENDING`, and a session holding bytes this
+pass cannot continue is abandoned where the offset is known rather than
+discovered three calls later by a provider saying no.
+
+**The assertion that passed for both.** `StateMachineTest` asserted that every
+recovery target is a legal transition. `CACHED` is. It never asked whether the
+item could *leave* again, which is the only thing the target is for. This is the
+third defect of the same shape — an assertion true of the broken code — and
+`docs/testing.md` rule 2 covers it: an assertion that can pass by having nothing
+to check is not an assertion.
+
+**What changes it.** A checkpointable hash — §19.4's pipeline is designed for
+one, and `docs/decisions.md` ADR-0004 keeps the door open — would make
+byte-level resume possible and `CACHED` a real resume point again. That is a
+throughput change, not a correctness one, and it would need its own §31.4 run
+before it could be believed.

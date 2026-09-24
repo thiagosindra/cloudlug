@@ -256,10 +256,18 @@ class FakeCloudProvider(
         }
         require(chunk.length <= capabilities.maxUploadChunkBytes) { "chunk exceeds maxUploadChunkBytes" }
         if (chunk.offset != pending.received.toLong()) {
+            // The kind a real provider answers with: Dropbox's `incorrect_offset`
+            // and Drive's 308 both say "this session is not where you think it
+            // is", which §23 reads as UPLOAD_SESSION_EXPIRED so §22.5 can
+            // restart the item. PERMANENT here understated it, and the
+            // difference is not cosmetic: PERMANENT fails one file, whereas the
+            // real kind raises UploadSessionRestartException, which is what
+            // actually happens to a transfer resuming into a session it cannot
+            // continue.
             throw CloudException(
-                CloudErrorKind.PERMANENT,
+                CloudErrorKind.UPLOAD_SESSION_EXPIRED,
                 "chunk at ${chunk.offset} does not continue from ${pending.received}",
-                code = "bad_offset",
+                code = "incorrect_offset",
             )
         }
         val bytes = corruptIfInjected(chunk.bytes.copyOfRange(0, chunk.length))

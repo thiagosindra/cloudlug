@@ -165,16 +165,19 @@ class StateMachineTest {
             TransferItemStatus.PENDING,
             TransferItemStateMachine.recoveryStatusFor(TransferItemStatus.CHECKING_DESTINATION),
         )
-        assertEquals(
-            TransferItemStatus.CACHED,
-            TransferItemStateMachine.recoveryStatusFor(TransferItemStatus.UPLOADING),
-        )
+        listOf(TransferItemStatus.CACHED, TransferItemStatus.UPLOADING, TransferItemStatus.VERIFYING).forEach {
+            assertEquals(
+                TransferItemStatus.PENDING,
+                TransferItemStateMachine.recoveryStatusFor(it),
+                "an item left $it by process death has to restart; the engine cannot re-enter it there",
+            )
+        }
         listOf(
             TransferItemStatus.PENDING,
-            TransferItemStatus.CACHED,
-            TransferItemStatus.VERIFYING,
             TransferItemStatus.COMPLETED,
+            TransferItemStatus.SKIPPED_DUPLICATE,
             TransferItemStatus.CONFLICT,
+            TransferItemStatus.FAILED,
         ).forEach { assertEquals(it, TransferItemStateMachine.recoveryStatusFor(it), "$it must be left alone") }
     }
 
@@ -189,5 +192,26 @@ class StateMachineTest {
                 )
             }
         }
+    }
+
+    /**
+     * The assertion above is only half of it, and the missing half was a real
+     * defect: recovery sent an interrupted upload to CACHED, which is a legal
+     * transition and a dead end. `FileTransferWorker` restarts a file at
+     * CHECKING_DESTINATION, so a recovery target the item cannot leave that way
+     * stalls the transfer with an [IllegalItemTransitionException] on the very
+     * next run.
+     */
+    @Test
+    fun `every recovery target can start work again`() {
+        TransferItemStatus.entries
+            .filterNot { it.isTerminal || it == TransferItemStatus.PENDING }
+            .forEach { status ->
+                val target = TransferItemStateMachine.recoveryStatusFor(status)
+                assertTrue(
+                    TransferItemStateMachine.isLegal(target, TransferItemStatus.CHECKING_DESTINATION),
+                    "an item recovered from $status lands in $target, which cannot begin a file again",
+                )
+            }
     }
 }

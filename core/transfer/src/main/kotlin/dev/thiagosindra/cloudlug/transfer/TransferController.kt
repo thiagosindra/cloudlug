@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlin.coroutines.coroutineContext
 
 /**
  * The Transfer Controller of spec §35, between the Compose UI and the engine.
@@ -66,6 +67,37 @@ class TransferController(
                     lock.withLock { jobs.remove(id) }
                 }
             }
+        }
+    }
+
+    /**
+     * Runs [id] to completion in the **caller's** coroutine.
+     *
+     * This is what a platform job needs and [start] cannot give it: a job is
+     * alive only while its callback has not returned, so the work has to happen
+     * inside the call rather than in a scope that outlives it. [start] keeps
+     * its app-scoped behaviour for the in-app path.
+     *
+     * Both register in the same map, so a scheduled job and a screen pressing
+     * Start cannot end up driving one transfer at once — which would be two
+     * writers on one manifest.
+     */
+    suspend fun run(id: TransferId): TransferStatus {
+        val mine = coroutineContext[Job] ?: error("run() needs a cancellable coroutine")
+        val alreadyRunning = lock.withLock {
+            if (jobs[id]?.isActive == true) true else { jobs[id] = mine; false }
+        }
+        // Not an error and not a second run: the database is authoritative
+        // (§2.4), so the honest answer is whatever the transfer is doing now.
+        if (alreadyRunning) return repository.findTransfer(id)?.status ?: error("No transfer $id")
+
+        return try {
+            engine.run(id)
+        } finally {
+            // Only if it is still ours: a pause between here and there replaces
+            // the entry, and removing someone else's would leave that runner
+            // unguarded.
+            lock.withLock { if (jobs[id] === mine) jobs.remove(id) }
         }
     }
 

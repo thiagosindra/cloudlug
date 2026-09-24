@@ -1,6 +1,9 @@
 package dev.thiagosindra.cloudlug.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -19,14 +22,17 @@ import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import dev.thiagosindra.cloudlug.BuildConfig
 import dev.thiagosindra.cloudlug.app.di.DemoAccounts
+import dev.thiagosindra.cloudlug.app.di.DemoPace
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 import dev.thiagosindra.cloudlug.feature.accounts.AccountsScreen
 import dev.thiagosindra.cloudlug.feature.home.HomeScreen
 import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
 import dev.thiagosindra.cloudlug.feature.transferdetails.TransferDetailScreen
 import dev.thiagosindra.cloudlug.app.crash.CrashReportScreen
 import dev.thiagosindra.cloudlug.app.crash.crashReporter
+import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.ui.CloudLugTheme
 
 @AndroidEntryPoint
@@ -34,6 +40,12 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var demoAccounts: DemoAccounts
+
+    @Inject
+    lateinit var scheduler: TransferScheduler
+
+    @Inject
+    lateinit var demoPace: DemoPace
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +63,30 @@ class MainActivity : ComponentActivity() {
         // than state a disconnect can permanently remove.
         if (BuildConfig.DEBUG) {
             lifecycleScope.launch { demoAccounts.seed() }
+
+            // §31.4's harness kills CloudLug mid-file, and it lives in another
+            // process: this extra is the only way it can ask for a transfer
+            // slow enough to still be running when the kill lands. Absent on
+            // every other launch, which leaves the demo providers instant —
+            // see DemoPace.
+            demoPace.set(intent.getLongExtra(EXTRA_DEMO_PACE_MS, 0L).milliseconds)
+        }
+
+        // §2.4: the database is authoritative and a worker is disposable, so
+        // opening the app is a chance to put the schedule back together. It
+        // also covers the one case a boot receiver cannot: a user-initiated job
+        // may only be scheduled while the app is visible, so a transfer that
+        // survived a reboot without its job is picked up here.
+        lifecycleScope.launch { scheduler.reconcile() }
+
+        // §24.4's notification is mandatory for a user-initiated job on 34+, so
+        // asking is not optional either. Asked on first launch rather than at
+        // the moment a transfer starts: being refused here costs a notification,
+        // being refused there costs the job.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }
         // Read once, before composing: consuming clears the file, so a crash
         // is shown on the next launch and not the one after that.
@@ -138,3 +174,13 @@ fun CloudLugNavHost() {
         }
     }
 }
+
+/** Request code for §24.4's runtime notification permission (API 33+). */
+private const val REQUEST_NOTIFICATIONS = 1
+
+/**
+ * Milliseconds the demo providers spend on each chunk, read off the launch
+ * intent in debug builds only (§31.4). `:tools:recovery-test` names this string
+ * too; it cannot depend on `:app`, which is the whole point of that module.
+ */
+private const val EXTRA_DEMO_PACE_MS = "dev.thiagosindra.cloudlug.DEMO_PACE_MS"
