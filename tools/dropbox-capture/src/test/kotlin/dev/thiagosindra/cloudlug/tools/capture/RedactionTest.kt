@@ -8,6 +8,12 @@ import kotlin.test.assertTrue
 /**
  * The half of the capture tool that can be checked without an account — and
  * the half where a mistake is unrecoverable, because a fixture is committed.
+ *
+ * Every value here is invented. They have the length and character set of the
+ * real thing, because the assertions below turn on length — but a test that
+ * proves a captured value gets removed has no business keeping one, and an
+ * earlier draft of this file did exactly that: it pasted the two real session
+ * ids in as inputs, and so put back what the fixtures had just been cleaned of.
  */
 class RedactionTest {
 
@@ -62,12 +68,57 @@ class RedactionTest {
     }
 
     @Test
-    fun `hashes, revisions, sessions and timestamps are kept verbatim`() {
-        val body = """{"rev":"a1c10ce0dd78","content_hash":"$HASH","session_id":"AAAAAA","server_modified":"2026-09-22T15:18:01Z"}"""
+    fun `hashes, revisions and timestamps are kept verbatim`() {
+        val body = """{"rev":"a1c10ce0dd78","content_hash":"$HASH","server_modified":"2026-09-22T15:18:01Z"}"""
 
         // §21 verifies against the content hash, so a redacted one would leave
         // a fixture that cannot test what it was captured for.
         assertEquals(body, Redaction(ROOT).redact(body))
+    }
+
+    @Test
+    fun `an upload session id is replaced, at exactly its own length`() {
+        val real = "pid_upload_session:Sy8tsQmZ4RkXwCbNfLpVdHgTjEuA0oIyKcW3nBvMqZrXeD1TgL"
+        val redacted = Redaction(ROOT).redact("""{"session_id":"$real"}""")
+
+        assertFalse("Sy8tsQmZ" in redacted, "the session id survived: $redacted")
+        val replaced = Regex("\"session_id\":\"([^\"]*)\"").find(redacted)!!.groupValues[1]
+        // §22.5 reads an offset out of one of these. A placeholder of some
+        // other shape would test a body Dropbox never sends.
+        assertEquals(real.length, replaced.length, "the replacement changed the body's length")
+        assertTrue(replaced.startsWith("pid_upload_session:"), "the prefix has to survive for the shape to parse")
+    }
+
+    @Test
+    fun `the other spelling of a session id is replaced too`() {
+        // `upload_session_id` is what the §23 insufficient_space body carries,
+        // and it was the one that sat in the repository verbatim the longest.
+        val redacted = Redaction(ROOT).redact("""{"upload_session_id":"pid_upload_session:Ry2mKfQpZ9d"}""")
+
+        assertFalse("Ry2mKfQp" in redacted, "the session id survived: $redacted")
+    }
+
+    @Test
+    fun `a cursor is replaced, at exactly its own length`() {
+        val real = "Cu7rSoRvAlUeFoRtEsTsOnLyNoTaReAlDrOpBoXcUrSoR0000001"
+        val redacted = Redaction(ROOT).redact("""{"cursor":"$real","has_more":false}""")
+
+        assertFalse("Cu7rSoRv" in redacted, "the cursor survived: $redacted")
+        val replaced = Regex("\"cursor\":\"([^\"]*)\"").find(redacted)!!.groupValues[1]
+        assertEquals(real.length, replaced.length, "the replacement changed the body's length")
+        assertTrue("has_more" in redacted, "nothing else in the body may move")
+    }
+
+    @Test
+    fun `the same session id and cursor keep the same pseudonym across bodies`() {
+        val redaction = Redaction(ROOT)
+        val started = redaction.redact("""{"session_id":"pid_upload_session:AAAAAA"}""")
+        val finished = redaction.redact("""{"upload_session_id":"pid_upload_session:AAAAAA"}""")
+
+        // The upload tests drive start -> append -> finish against one session;
+        // a per-occurrence pseudonym would make the three files disagree.
+        val one = Regex("\"session_id\":\"([^\"]*)\"").find(started)!!.groupValues[1]
+        assertTrue(one in finished, "one session must redact the same way in every file")
     }
 
     @Test
