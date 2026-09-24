@@ -88,6 +88,32 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
             formatBytes(transfer.completedBytes)
     }
 
+    /**
+     * Keeps §24.4's "say why" true after the job that was saying it has gone.
+     *
+     * A worker's foreground notification dies with the worker, and a transfer
+     * that parks is exactly when the worker ends and the user is still owed an
+     * explanation: the screen is off, nothing is moving, and a notification
+     * that simply disappeared says the transfer finished. So a parked transfer
+     * is re-posted as an ordinary notification, which outlives the job.
+     *
+     * PAUSED is not parked. The user did that deliberately (§22.1) and knows
+     * why; anything terminal has nothing left to say. Both take the
+     * notification down.
+     */
+    fun publishParked(
+        transfer: TransferEntity,
+        accountNames: Map<dev.thiagosindra.cloudlug.model.AccountId, String> = emptyMap(),
+    ) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        if (transfer.status in PARKED) {
+            ensureChannel()
+            manager.notify(notificationId(transfer.id), build(transfer, null, accountNames))
+        } else {
+            manager.cancel(notificationId(transfer.id))
+        }
+    }
+
     private fun action(label: String, action: TransferAction, transfer: TransferEntity): Notification.Action {
         val intent = Intent(context, TransferActionReceiver::class.java).apply {
             this.action = action.name
@@ -104,6 +130,13 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
 
     internal companion object {
         const val CHANNEL = "cloudlug.transfers"
+
+        /** §13.1's waiting states: stopped, not finished, and not by the user. */
+        private val PARKED = setOf(
+            TransferStatus.WAITING_FOR_WIFI,
+            TransferStatus.WAITING_FOR_STORAGE,
+            TransferStatus.AUTH_REQUIRED,
+        )
     }
 }
 

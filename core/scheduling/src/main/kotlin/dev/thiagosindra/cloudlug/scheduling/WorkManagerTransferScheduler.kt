@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.scheduling
 
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
@@ -7,10 +8,12 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
+import androidx.work.WorkRequest
 import dev.thiagosindra.cloudlug.database.TransferRepository
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.transfer.schedule.NetworkRequirement
 import dev.thiagosindra.cloudlug.transfer.schedule.SchedulingPolicy
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 /**
@@ -49,6 +52,12 @@ class WorkManagerTransferScheduler @Inject constructor(
             .setConstraints(constraints)
             .setInputData(Data.Builder().putString(TransferWorker.KEY_TRANSFER_ID, id.value).build())
             .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            // The worker retries only when §16 parked the transfer for want of
+            // an allowed network, and the constraint above already makes it
+            // wait for one. WorkManager's floor of ten seconds is therefore the
+            // right figure: the backoff is not a cool-down, it is how soon
+            // after Wi-Fi returns the transfer picks up.
+            .setBackoffCriteria(BackoffPolicy.LINEAR, WorkRequest.MIN_BACKOFF_MILLIS, TimeUnit.MILLISECONDS)
             .build()
 
         // KEEP, not REPLACE: enqueueing a transfer that is already running must

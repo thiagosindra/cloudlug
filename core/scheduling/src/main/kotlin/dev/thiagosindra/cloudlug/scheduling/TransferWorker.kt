@@ -10,6 +10,8 @@ import androidx.work.WorkerParameters
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import dev.thiagosindra.cloudlug.model.TransferId
+import dev.thiagosindra.cloudlug.model.TransferStatus
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 
 /** Where a §17 WorkManager transfer actually runs, on API 26–33. */
@@ -25,13 +27,30 @@ class TransferWorker @AssistedInject constructor(
         val raw = inputData.getString(KEY_TRANSFER_ID) ?: return@coroutineScope Result.failure()
         val id = TransferId(raw)
 
-        runner.run(id, this) { notification -> setForeground(foreground(id, notification)) }
+        val status = try {
+            runner.run(id, this) { notification -> setForeground(foreground(id, notification)) }
+        } catch (stopped: CancellationException) {
+            // WorkManager enforces the §16 constraint by cancelling the worker,
+            // which the engine cannot tell from a pause. Say what happened
+            // before unwinding; WorkManager re-enqueues constraint-stopped work
+            // itself, so there is no Result to return here.
+            runner.parkForNetwork(id)
+            throw stopped
+        }
 
-        // Always success: "the transfer did not complete" is not a worker
-        // failure, it is a row in a state the next reconcile will look at.
-        // Asking WorkManager to retry would put a second policy on top of
-        // §23's, with its own backoff and its own opinions.
-        Result.success()
+        // "The transfer did not complete" is not a worker failure: it is a row
+        // in a state the next reconcile will look at, and asking WorkManager to
+        // retry an *error* would put a second policy on top of §23's, with its
+        // own backoff and its own opinions.
+        //
+        // WAITING_FOR_WIFI is the exception, and it is not an error at all. It
+        // is this request's own network constraint saying no, so a retry is the
+        // platform re-applying that constraint — §16's "resumes automatically"
+        // with nothing in the app watching connectivity. Returning success here
+        // finished the work instead, and the transfer sat parked until someone
+        // opened the app. The other two waiting states clear when the user does
+        // something (§13.1), not when a constraint does.
+        if (status == TransferStatus.WAITING_FOR_WIFI) Result.retry() else Result.success()
     }
 
     /**

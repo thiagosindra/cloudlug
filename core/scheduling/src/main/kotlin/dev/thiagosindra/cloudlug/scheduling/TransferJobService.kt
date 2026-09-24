@@ -55,6 +55,14 @@ class TransferJobService : JobService() {
      */
     override fun onStopJob(params: JobParameters): Boolean {
         work?.cancel()
+        val id = params.extras.getString(UidtTransferScheduler.EXTRA_TRANSFER_ID)
+        if (id != null) {
+            // Says why, when the why is §16 — see TransferRunner.parkForNetwork,
+            // which checks rather than assumes. goAsync has no equivalent here,
+            // so this is best-effort against the process outliving the job; the
+            // next reconcile settles it either way (§2.4).
+            scope.launch { runner.parkForNetwork(TransferId(id)) }
+        }
         return true
     }
 

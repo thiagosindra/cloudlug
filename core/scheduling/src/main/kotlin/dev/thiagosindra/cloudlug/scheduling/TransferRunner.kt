@@ -5,12 +5,16 @@ import dev.thiagosindra.cloudlug.database.TransferRepository
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferStatus
 import dev.thiagosindra.cloudlug.transfer.TransferController
+import dev.thiagosindra.cloudlug.transfer.pipeline.NetworkMonitor
+import dev.thiagosindra.cloudlug.transfer.policy.NetworkPolicyGate
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -27,6 +31,7 @@ class TransferRunner @Inject constructor(
     private val controller: TransferController,
     private val repository: TransferRepository,
     private val notifications: TransferNotifications,
+    private val networkMonitor: NetworkMonitor,
 ) {
 
     /**
@@ -60,7 +65,45 @@ class TransferRunner @Inject constructor(
             controller.run(id)
         } finally {
             updates.cancel()
+            // NonCancellable because pause *is* cancellation (§22.1): without
+            // it the suspending read below would throw and the paused
+            // transfer's notification would be left on screen claiming to be
+            // running.
+            withContext(NonCancellable) {
+                repository.findTransfer(id)?.let(notifications::publishParked)
+            }
         }
+    }
+
+    /**
+     * Records that the **platform**, not the engine, stopped [id] for want of
+     * an allowed network (§16, §24.4).
+     *
+     * Both schedulers enforce §16 as a constraint, and both enforce it by
+     * killing the job: WorkManager cancels the worker's coroutine, the platform
+     * calls `onStopJob`. The engine sees an ordinary cancellation — the same
+     * thing a pause looks like — unwinds, and leaves the row saying RUNNING
+     * with nothing running. §24.3 then shows "Running" and §24.4 shows a
+     * filename, for a transfer that has stopped and will not start again until
+     * a constraint the user cannot see is met.
+     *
+     * Guarded by §16's own gate rather than by a stop reason: a worker is
+     * stopped for plenty of reasons that are not this one, and API 30 does not
+     * report which. Asking the network directly is both simpler and true.
+     */
+    suspend fun parkForNetwork(id: TransferId) = withContext(NonCancellable) {
+        val transfer = repository.findTransfer(id) ?: return@withContext
+        if (transfer.status != TransferStatus.RUNNING) return@withContext
+        val hold = NetworkPolicyGate.holdStatusFor(transfer.networkPolicy, networkMonitor.current())
+            ?: return@withContext
+        notifications.publishParked(
+            repository.transitionTransfer(
+                id,
+                hold,
+                errorCode = "network_constraint",
+                errorMessage = "the transfer is waiting for a network its policy allows",
+            ),
+        )
     }
 
     private suspend fun transferNow(id: TransferId) =
