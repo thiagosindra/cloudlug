@@ -335,7 +335,10 @@ class TransferRepositoryTest {
             TransferItemStatus.PENDING,
             repository.findItem(TransferItemId("downloading"))?.status,
         )
-        assertEquals(TransferItemStatus.CACHED, repository.findItem(TransferItemId("uploading"))?.status)
+        // PENDING, not CACHED: the engine restarts a file at
+        // CHECKING_DESTINATION, which CACHED cannot reach — see
+        // TransferItemStateMachine.recoveryStatusFor.
+        assertEquals(TransferItemStatus.PENDING, repository.findItem(TransferItemId("uploading"))?.status)
         assertEquals(TransferItemStatus.COMPLETED, repository.findItem(TransferItemId("done"))?.status)
         assertEquals(1, repository.findTransfer(id)?.completedFiles)
     }

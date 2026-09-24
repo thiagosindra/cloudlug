@@ -22,8 +22,10 @@ import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import dev.thiagosindra.cloudlug.BuildConfig
 import dev.thiagosindra.cloudlug.app.di.DemoAccounts
+import dev.thiagosindra.cloudlug.app.di.DemoPace
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.milliseconds
 import dev.thiagosindra.cloudlug.feature.accounts.AccountsScreen
 import dev.thiagosindra.cloudlug.feature.home.HomeScreen
 import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
@@ -42,6 +44,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var scheduler: TransferScheduler
 
+    @Inject
+    lateinit var demoPace: DemoPace
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -58,6 +63,13 @@ class MainActivity : ComponentActivity() {
         // than state a disconnect can permanently remove.
         if (BuildConfig.DEBUG) {
             lifecycleScope.launch { demoAccounts.seed() }
+
+            // §31.4's harness kills CloudLug mid-file, and it lives in another
+            // process: this extra is the only way it can ask for a transfer
+            // slow enough to still be running when the kill lands. Absent on
+            // every other launch, which leaves the demo providers instant —
+            // see DemoPace.
+            demoPace.set(intent.getLongExtra(EXTRA_DEMO_PACE_MS, 0L).milliseconds)
         }
 
         // §2.4: the database is authoritative and a worker is disposable, so
@@ -165,3 +177,10 @@ fun CloudLugNavHost() {
 
 /** Request code for §24.4's runtime notification permission (API 33+). */
 private const val REQUEST_NOTIFICATIONS = 1
+
+/**
+ * Milliseconds the demo providers spend on each chunk, read off the launch
+ * intent in debug builds only (§31.4). `:tools:recovery-test` names this string
+ * too; it cannot depend on `:app`, which is the whole point of that module.
+ */
+private const val EXTRA_DEMO_PACE_MS = "dev.thiagosindra.cloudlug.DEMO_PACE_MS"
