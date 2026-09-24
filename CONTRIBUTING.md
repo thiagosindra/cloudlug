@@ -50,8 +50,62 @@ contributor registers their own:
   self-builders using their own client, added as a test user on their own
   project (spec §8.2).
 
-Put local credentials in files that are already git-ignored
-(`local.properties`, `secrets.properties`) and never in version control.
+**Credentials reach the build through the environment, never through a file.**
+The live tools and the contract gate read `DROPBOX_REFRESH_TOKEN` and
+`DROPBOX_TEST_ROOT` from environment variables; CI reads them from repository
+secrets. Not `local.properties`, not `secrets.properties`, not a Gradle
+property — a git-ignored file is one `git add -f`, one editor "save all", or
+one fresh clone with stale ignore rules away from being committed, and the
+rule that has no exception is easier to follow than the rule that has one.
+
+## Privacy in contributions
+
+CloudLug moves other people's files for a living, and this repository is
+public. Nothing that identifies a person, an account or a device belongs in
+it — not in code, not in a fixture, not in a test, not in documentation, not
+in a commit message, and not in a pull request description. All of those are
+permanent and all of them are searchable.
+
+**Never commit, and never write into a PR description:**
+
+- account identifiers — Dropbox `dbid:` or `account_id` values, Google account
+  ids, team member ids;
+- email addresses, including your own, in documentation, mock-ups, fixtures or
+  test data. Use the reserved domains: `example.com`, `example.invalid`,
+  `example.test`;
+- display names, real or borrowed;
+- real cloud paths or filenames. Every path and name in a fixture or a test is
+  one this project invented or the capture tool created;
+- keystore fingerprints — the SHA-1 or SHA-256 of a signing certificate;
+- device identifiers, including the **model number** of a phone you tested on.
+  "a Samsung phone running Android 16" says everything a bug report needs.
+
+**Provider responses enter the repository only through the capture tool.**
+Run `./gradlew :tools:dropbox-capture:captureDropboxFixtures`; do not paste a
+body you saw in a log, a debugger or a browser. The tool pseudonymizes object
+ids, account ids, paths, upload session ids and `list_folder` cursors, keeps
+the same pseudonym for the same value across a whole run so containment
+survives, and preserves each replacement's length and character set so the
+body still parses the way the real one did. A response that arrives any other
+way has been through no such pass, and "it looked harmless" is how the two
+session ids and the real filename that used to be in this history got here.
+
+Session ids and cursors are **not** credentials — neither is usable without an
+access token, and a session expires in about a week. They are replaced anyway:
+"inert" and "not mine to publish" are different tests, and only the second one
+governs a public repository.
+
+**Credentials never enter the repository in any form.** Environment variables
+for local runs, repository secrets for CI, and nothing else — see
+[Provider credentials](#provider-credentials). No tokens, authorization codes,
+`Authorization` headers, file contents or filenames in logs either; spec §26 is
+the rule and `:core:network`'s redaction interceptor enforces it with a
+deny-by-default header allow-list.
+
+**If something does get in**, say so rather than quietly deleting it in a later
+commit: a deletion leaves the value in history, reachable by commit SHA, for as
+long as the repository exists. Removing it means rewriting history, and doing
+that is much cheaper before the commit is pushed than after.
 
 ## Making a change
 
