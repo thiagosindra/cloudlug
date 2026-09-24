@@ -1,12 +1,13 @@
 package dev.thiagosindra.cloudlug.recovery
 
 import android.content.Intent
+import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
-import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
+import java.io.ByteArrayOutputStream
 import java.util.regex.Pattern
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -88,7 +89,7 @@ class CloudLug {
         click("demo-destination@example.invalid")
 
         await("3. Choose what to transfer")
-        clickDescription("Select photos")
+        click("Select photos")
         click("Next")
 
         await("4. Choose the destination folder")
@@ -145,38 +146,78 @@ class CloudLug {
         device.waitForIdle()
     }
 
-    fun await(text: String, timeoutMillis: Long = STEP_TIMEOUT): UiObject2 =
-        awaitSelector(By.text(text), timeoutMillis) { "waited ${timeoutMillis}ms for \"$text\"" }
-
-    fun click(text: String) {
-        awaitSelector(By.text(text), STEP_TIMEOUT) { "waited ${STEP_TIMEOUT}ms to click \"$text\"" }.click()
-    }
-
-    fun clickDescription(description: String) {
-        awaitSelector(By.desc(description), STEP_TIMEOUT) {
-            "waited ${STEP_TIMEOUT}ms to click the control described \"$description\""
-        }.click()
-    }
-
-    private fun awaitSelector(selector: BySelector, timeoutMillis: Long, what: () -> String): UiObject2 =
-        checkNotNull(device.wait(Until.findObject(selector), timeoutMillis)) {
-            "${what()}, and it never appeared.\n${visibleText()}"
+    /**
+     * Waits for the thing labelled [label] and returns it.
+     *
+     * Four selectors, tried most specific first, because the accessibility
+     * tree is not the semantics tree. Compose merges a clickable node's
+     * descendants and normally publishes their text as `text` — but a control
+     * labelled through `Modifier.semantics { contentDescription = … }`
+     * publishes it as a description instead, and a node that draws something
+     * else alongside publishes it as a substring. `:app`'s own tests read the
+     * semantics tree directly and never have to know the difference; this
+     * module only has what the platform exported.
+     */
+    fun await(label: String, timeoutMillis: Long = STEP_TIMEOUT): UiObject2 {
+        val selectors = listOf(By.text(label), By.desc(label), By.textContains(label), By.descContains(label))
+        val deadline = SystemClock.uptimeMillis() + timeoutMillis
+        while (true) {
+            selectors.forEach { selector -> device.findObject(selector)?.let { return it } }
+            if (SystemClock.uptimeMillis() >= deadline) break
+            SystemClock.sleep(POLL_MILLIS)
         }
+        error("waited ${timeoutMillis}ms for \"$label\", and nothing on screen carried it.\n${visibleText()}")
+    }
+
+    fun click(label: String) = await(label).click()
 
     /**
      * What is on screen, for the failure message.
      *
      * A UiAutomator failure otherwise says only that a selector found nothing,
-     * which cannot distinguish "the button is not there" from "the app is
-     * showing a crash report" from "the emulator is on the launcher".
+     * which cannot distinguish "the control is not there" from "the app is
+     * showing a crash report" from "the label is carried by an attribute the
+     * selector did not ask about". The last of those is not hypothetical: the
+     * first run of this suite failed on the §24.1 button with the rest of the
+     * screen present, and the compact list below could not say whether the
+     * button was missing or merely unlabelled — so the full node dump is
+     * printed with it.
      */
     fun visibleText(): String {
         val texts = device.findObjects(By.pkg(PACKAGE))
             .mapNotNull { it.text?.takeIf(String::isNotBlank) ?: it.contentDescription }
             .distinct()
         return "On screen (${device.currentPackageName}): " +
-            if (texts.isEmpty()) "nothing from $PACKAGE" else texts.joinToString(" | ")
+            (if (texts.isEmpty()) "nothing from $PACKAGE" else texts.joinToString(" | ")) +
+            "\n" + hierarchy()
     }
+
+    /** Every node the platform exported that is labelled or touchable. */
+    private fun hierarchy(): String = runCatching {
+        val xml = ByteArrayOutputStream().use { out ->
+            device.dumpWindowHierarchy(out)
+            out.toString(Charsets.UTF_8.name())
+        }
+        NODE.findAll(xml)
+            .map { it.value }
+            .filter {
+                attribute(it, "text").isNotEmpty() ||
+                    attribute(it, "content-desc").isNotEmpty() ||
+                    attribute(it, "clickable") == "true"
+            }
+            .joinToString("\n") {
+                "  ${attribute(it, "class")} " +
+                    "text=\"${attribute(it, "text")}\" " +
+                    "desc=\"${attribute(it, "content-desc")}\" " +
+                    "clickable=${attribute(it, "clickable")} " +
+                    "visible=${attribute(it, "visible-to-user").ifEmpty { "?" }} " +
+                    attribute(it, "bounds")
+            }
+            .take(HIERARCHY_LIMIT)
+    }.getOrElse { "  (window hierarchy unavailable: $it)" }
+
+    private fun attribute(tag: String, name: String) =
+        Regex("""\s$name="([^"]*)"""").find(tag)?.groupValues?.get(1).orEmpty()
 
     companion object {
         const val PACKAGE = "dev.thiagosindra.cloudlug"
@@ -200,5 +241,12 @@ class CloudLug {
 
         /** §24.3's "3 / 12 files". */
         val FILE_COUNT: Pattern = Pattern.compile("\\d+ / \\d+ files")
+
+        const val POLL_MILLIS = 250L
+
+        /** Enough of the tree to see what is there; a failure message, not a log. */
+        const val HIERARCHY_LIMIT = 4_000
+
+        val NODE = Regex("<node [^>]*>")
     }
 }
