@@ -1,9 +1,21 @@
 name: build
 
 on:
+  # `main` only, not every branch. A branch with a pull request open was
+  # matching both triggers, so every push to one ran the whole workflow
+  # twice — two emulator boots, ~40 minutes, for one commit. The pull_request
+  # trigger below covers branches, which is where the checks are read.
   push:
-    branches: ["**"]
+    branches: ["main"]
   pull_request:
+
+# One run per ref. Pushing a fix while the previous commit's emulator is still
+# booting used to leave both running to completion, and the older one's result
+# is worthless the moment it exists: four superseded runs went the full
+# distance in a single evening.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

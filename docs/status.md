@@ -105,6 +105,14 @@ and `Dropbox live contract tests` (§31.2) — each reading
 **"Green" means both CI jobs plus the emulator job**, not `./gradlew build`
 alone. The emulator job runs all three connected suites above.
 
+That job is also what CI costs: roughly thirteen minutes of its twenty per
+run, nearly all of it booting an AVD. The workflow therefore runs once per
+commit rather than twice — `push` is restricted to `main`, and a branch's
+checks come from its pull request — and `concurrency` cancels a run the
+moment a newer commit supersedes it. Both were added after a single evening
+of iteration exhausted the account's monthly Actions minutes, most of it
+spent on superseded commits and on running everything twice.
+
 JDK 17 or newer. `build` needs an Android SDK with platform 36; the JVM modules
 still need none, which the `jvm` CI job proves by naming them explicitly.
 
