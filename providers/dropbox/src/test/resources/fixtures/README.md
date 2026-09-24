@@ -6,8 +6,10 @@ a fixture is only worth having if it is what the service actually sent
 
 Object ids, account ids and paths are replaced with stable pseudonyms — the same
 real id maps to the same pseudonym across every file, so the containment the
-enumeration tests check survives. `rev`, `content_hash`, `session_id` and
-timestamps are kept verbatim: none of them names a person or a place, and the
+enumeration tests check survives. Upload session ids and `list_folder`
+cursors are replaced too, keeping their original length and character set so
+the bodies still parse the way the captured ones did. `rev`, `content_hash`
+and timestamps are kept verbatim: neither names a person or a place, and the
 hashes are what §21's verification asserts against. Every name in these files
 was created by the capture tool, so no real filename appears.
 
