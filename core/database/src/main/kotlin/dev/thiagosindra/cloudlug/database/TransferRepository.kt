@@ -68,6 +68,15 @@ class TransferRepository(
 
     fun observeTransfers() = database.transfers.observeAll()
 
+    /**
+     * Every transfer, once, for a caller that is not a screen.
+     *
+     * §17's scheduler rebuilds the whole schedule from rows after process death
+     * or reboot, and wants the list rather than a subscription to it: it acts
+     * and returns, and a Flow would leave it holding something.
+     */
+    suspend fun listTransfers(): List<TransferEntity> = database.transfers.listAll()
+
     fun observeItems(transferId: TransferId) = database.items.observeByTransfer(transferId)
 
     /**

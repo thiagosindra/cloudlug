@@ -1,6 +1,9 @@
 package dev.thiagosindra.cloudlug.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,6 +30,7 @@ import dev.thiagosindra.cloudlug.feature.newtransfer.NewTransferScreen
 import dev.thiagosindra.cloudlug.feature.transferdetails.TransferDetailScreen
 import dev.thiagosindra.cloudlug.app.crash.CrashReportScreen
 import dev.thiagosindra.cloudlug.app.crash.crashReporter
+import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.ui.CloudLugTheme
 
 @AndroidEntryPoint
@@ -34,6 +38,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var demoAccounts: DemoAccounts
+
+    @Inject
+    lateinit var scheduler: TransferScheduler
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +58,23 @@ class MainActivity : ComponentActivity() {
         // than state a disconnect can permanently remove.
         if (BuildConfig.DEBUG) {
             lifecycleScope.launch { demoAccounts.seed() }
+        }
+
+        // §2.4: the database is authoritative and a worker is disposable, so
+        // opening the app is a chance to put the schedule back together. It
+        // also covers the one case a boot receiver cannot: a user-initiated job
+        // may only be scheduled while the app is visible, so a transfer that
+        // survived a reboot without its job is picked up here.
+        lifecycleScope.launch { scheduler.reconcile() }
+
+        // §24.4's notification is mandatory for a user-initiated job on 34+, so
+        // asking is not optional either. Asked on first launch rather than at
+        // the moment a transfer starts: being refused here costs a notification,
+        // being refused there costs the job.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
         }
         // Read once, before composing: consuming clears the file, so a crash
         // is shown on the next launch and not the one after that.
@@ -138,3 +162,6 @@ fun CloudLugNavHost() {
         }
     }
 }
+
+/** Request code for §24.4's runtime notification permission (API 33+). */
+private const val REQUEST_NOTIFICATIONS = 1

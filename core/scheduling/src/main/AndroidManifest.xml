@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- §17's two paths. RUN_USER_INITIATED_JOBS is 34+; the foreground
+         service permissions cover 26-33's dataSync worker. -->
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Required by JobInfo.setPersisted, and by the boot receiver below. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application>
+        <!--
+          Declared for every API level even though it is only ever scheduled on
+          34+: a service that is never started costs nothing, and a manifest
+          that varies by version would be the harder thing to reason about.
+          tools:targetApi records that the version guard is in the scheduler.
+        -->
+        <service
+            android:name=".TransferJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            tools:targetApi="34" />
+
+        <!--
+          WorkManager's own foreground service has to declare the type the
+          worker asks for, or setForeground throws on API 34+.
+        -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
+        <receiver
+            android:name=".TransferActionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

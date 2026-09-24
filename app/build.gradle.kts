@@ -44,6 +44,8 @@ dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:storage"))
     implementation(project(":core:transfer"))
+    // §17: the two platform schedulers and the §24.4 notification.
+    implementation(project(":core:scheduling"))
     implementation(project(":providers:api"))
     implementation(project(":providers:dropbox"))
     implementation(project(":core:network"))
@@ -78,6 +80,10 @@ dependencies {
     implementation(libs.sqlite.framework)
     implementation(libs.okhttp)
     implementation(libs.hilt.android)
+    // The Application is WorkManager's Configuration.Provider, so the
+    // worker factory is assembled here even though the worker is not.
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.hilt.work)
     implementation(libs.hilt.navigation.compose)
     ksp(libs.hilt.compiler)
     debugImplementation(libs.compose.ui.tooling)

@@ -5,6 +5,9 @@ dependencies {
     // §24.2 step 1 offers connected accounts now, which live here (§12.4).
     implementation(project(":core:auth"))
     implementation(project(":core:transfer"))
+    // §24.2 step 6 and §24.3's controls hand the transfer to the
+    // platform rather than running it in app scope (§17).
+    implementation(project(":core:scheduling"))
     implementation(project(":providers:api"))
 }
 

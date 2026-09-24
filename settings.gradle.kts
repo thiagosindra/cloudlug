@@ -45,6 +45,7 @@ include(
     ":core:auth",
     ":core:security",
     ":core:ui",
+    ":core:scheduling",
     ":feature:accounts",
     ":feature:home",
     ":feature:new-transfer",

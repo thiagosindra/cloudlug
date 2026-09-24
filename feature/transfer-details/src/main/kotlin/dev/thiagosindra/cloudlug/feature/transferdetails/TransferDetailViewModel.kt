@@ -12,6 +12,7 @@ import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.model.TransferItemId
 import dev.thiagosindra.cloudlug.model.TransferItemStatus
 import dev.thiagosindra.cloudlug.model.TransferStatus
+import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.ui.TransferStage
 import kotlinx.coroutines.flow.SharingStarted
@@ -58,6 +59,7 @@ data class DetailState(
 @HiltViewModel
 class TransferDetailViewModel @Inject constructor(
     private val controller: TransferController,
+    private val scheduler: TransferScheduler,
     accounts: AccountRepository,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
@@ -80,13 +82,23 @@ class TransferDetailViewModel @Inject constructor(
         }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
 
-    fun start() = viewModelScope.launch { controller.start(transferId) }
+    // Start, Resume and Retry all enqueue: the platform owns the running of a
+    // transfer now (§17), and the controller is what the platform's job calls.
+    fun start() = viewModelScope.launch { scheduler.enqueue(transferId) }
 
-    fun pause() = viewModelScope.launch { controller.pause(transferId) }
+    fun pause() = viewModelScope.launch {
+        // Cancel the job first: leaving it scheduled would have the platform
+        // start the transfer again the moment the controller let go.
+        scheduler.cancel(transferId)
+        controller.pause(transferId)
+    }
 
-    fun resume() = viewModelScope.launch { controller.resume(transferId) }
+    fun resume() = viewModelScope.launch { scheduler.enqueue(transferId) }
 
-    fun cancel() = viewModelScope.launch { controller.cancel(transferId) }
+    fun cancel() = viewModelScope.launch {
+        scheduler.cancel(transferId)
+        controller.cancel(transferId)
+    }
 
     fun cancelItem(itemId: TransferItemId) =
         viewModelScope.launch { controller.cancelItem(transferId, itemId) }
@@ -94,6 +106,6 @@ class TransferDetailViewModel @Inject constructor(
     /** Spec §22.4: re-queue what did not finish, then keep going. */
     fun retryIncomplete() = viewModelScope.launch {
         controller.retryIncomplete(transferId)
-        controller.start(transferId)
+        scheduler.enqueue(transferId)
     }
 }
