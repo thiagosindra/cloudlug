@@ -1,8 +1,14 @@
-# Status — v0.5 delivered (the transfer outlives the app)
+# Status — v0.5 held (the transfer outlives the app; the proof is owed)
 
 What exists, what is compiled, what is verified — and what has been verified
 **against a real cloud account or a real device** rather than against a fake
 that agrees with us.
+
+**v0.5 is not finished.** Everything below is built, and the JVM suite and
+two of the three instrumented suites are green — but §31.4's two device
+scenarios fail before they reach what they test, and settling why needs an
+emulator run this account has no Actions minutes left for until 2026-10-01.
+The milestone is held, not shipped; the detail is under "What is verified".
 
 **v0.5 is background execution.** Before it, the engine ran in an
 application-scoped coroutine started by a ViewModel, which made §17's "correctness
@@ -143,8 +149,8 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 **450 JVM tests, 0 failures**, of which 22 are the live Dropbox tests and skip
 without a credential — so **428 run hermetically**, on any machine, with no
 network. Plus **24 instrumented tests** on an emulator in CI: 10 in `:app`, 11
-in `:core:security` and 3 in `:tools:recovery-test`.
-`allWarningsAsErrors` is on everywhere.
+in `:core:security` and 3 in `:tools:recovery-test` — of which **two are
+failing**, for the reason below. `allWarningsAsErrors` is on everywhere.
 
 ## What is verified, and on what
 
@@ -157,21 +163,40 @@ Hilt graph constructs" and "whether `BundledSQLiteDriver` opens a database in an
 app data directory" as the first things to check. Both were precisely what
 broke. Writing a risk down is not the same as testing it — ADR-0025.
 
-**Verified on an emulator, in CI, from outside CloudLug's own process.**
-`:tools:recovery-test` is an empty application that instruments itself. It
-walks the §24.2 wizard, waits until §24.3 says a file is genuinely moving,
-`am force-stop`s CloudLug, confirms with `pidof` that the process is gone,
-relaunches, and asserts the transfer finishes with nothing to report. That is
-§31.4's first scenario, run for real for the first time.
+**Partly verified, and the part that is not is named here rather than
+implied.** `:tools:recovery-test` is an empty application that instruments
+itself, which is the only way to force-stop CloudLug and live to assert what
+happens next. On an emulator, in CI, **the mechanism passes**: it launches
+CloudLug, force-stops it, confirms with `pidof` that the process is gone, and
+relaunches it.
 
-Its sibling takes Wi-Fi away mid-transfer under UNMETERED_ONLY and asserts
-three things §16 and §24.4 promise: the transfer parks and §24.3 names the
-condition, the notification shade says the same thing, and putting Wi-Fi back
-is enough — nothing is pressed. All three were false before v0.5.
+**Its two scenarios do not yet pass**, and not because of anything they are
+testing. Both stop at their first action — clicking §24.1's "New Transfer" —
+with the rest of that screen plainly composed. The button is in the semantics
+tree, which is why `:app`'s own journey clicks it without trouble, and absent
+from the accessibility tree, which is all this module has. Compose builds the
+latter with
+`getAllUncoveredSemanticsNodesToIntObjectMap`, which drops nodes whose bounds
+are covered, so "absent from the accessibility tree" is a thing that can
+happen to a perfectly good control. If that is what this is, it is a §24.1
+defect and not a test problem: a screen reader could not reach that button
+either.
 
-**Not verified: the UIDT branch.** CI's emulator is API 30, so both scenarios
-above run against WorkManager. API 34+ is compiled and lint-clean and has never
-executed. See known gap 3.
+Settling which needs one emulator run, and the run cannot happen: the
+account's monthly Actions minutes were exhausted on 2026-09-24 and reset on
+2026-10-01. The harness prints the exported node tree in its failure message
+so that the next run answers it outright. Until then the two scenarios stay
+**failing and visible** rather than skipped — an `@Ignore` here would leave
+v0.5's headline claim resting on a test switched off.
+
+So what §31.4 has actually established so far is that the harness works, not
+that recovery does. Recovery's two defects were found and fixed against the
+JVM tests in `core/transfer`, which is a weaker thing than the device run and
+is exactly why the device run is still owed.
+
+**Not verified: the UIDT branch.** CI's emulator is API 30, so everything
+above runs against WorkManager. API 34+ is compiled and lint-clean and has
+never executed. See known gap 3.
 
 **Verified by JVM test (273, 0 failures).** Everything in `:core:*` and
 `:providers:*`: the engine, the state machines, the hash pipeline including
