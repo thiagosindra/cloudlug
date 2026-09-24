@@ -54,6 +54,22 @@ class TransferWorker @AssistedInject constructor(
     }
 
     /**
+     * Required, not optional, and its absence is silent.
+     *
+     * The request is expedited, and on API 30 and below WorkManager runs
+     * expedited work as a foreground service — so it calls this *before*
+     * `doWork`. `CoroutineWorker`'s default throws, WorkManager turns that
+     * throw into a failed WorkRequest, and nothing reaches the engine or the
+     * database: the transfer simply stays READY with a Resume button, which is
+     * exactly what the §24.2 journey found on the emulator. There is no log
+     * line in the app to read, because no line of the app ran.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        val id = TransferId(checkNotNull(inputData.getString(KEY_TRANSFER_ID)) { "worker has no transfer id" })
+        return foreground(id, runner.startingNotification(id))
+    }
+
+    /**
      * `dataSync` is the type §17 names, and from API 29 the type has to be
      * declared at the call as well as in the manifest.
      */

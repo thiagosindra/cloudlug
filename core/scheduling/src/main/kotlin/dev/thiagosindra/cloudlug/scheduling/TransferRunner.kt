@@ -76,6 +76,19 @@ class TransferRunner @Inject constructor(
     }
 
     /**
+     * The notification a job must already hold before it starts.
+     *
+     * Two callers, for two different platform demands. A user-initiated job on
+     * API 34+ must post one from the instant it runs. And WorkManager runs an
+     * *expedited* request as a foreground service on API 30 and below, so it
+     * asks the worker for this before `doWork` is ever entered.
+     */
+    suspend fun startingNotification(id: TransferId): Notification {
+        notifications.ensureChannel()
+        return notifications.build(transferNow(id), null)
+    }
+
+    /**
      * Records that the **platform**, not the engine, stopped [id] for want of
      * an allowed network (§16, §24.4).
      *

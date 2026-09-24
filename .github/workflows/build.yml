@@ -218,7 +218,12 @@ jobs:
           # runs were spent unable to see why a single assertion failed. The
           # step below prints the result XML instead, which is the part that
           # says something.
-          script: ./gradlew :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest :tools:recovery-test:connectedDebugAndroidTest
+          # --continue: the three suites are independent, and booting an
+          # emulator costs eight minutes. Without it the first failure hides
+          # whatever the other two would have said, which on the run that
+          # added :tools:recovery-test meant learning nothing at all about the
+          # two scenarios it exists for.
+          script: ./gradlew --continue :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest :tools:recovery-test:connectedDebugAndroidTest
 
       - name: Print the instrumentation results
         if: failure()
