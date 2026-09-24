@@ -287,25 +287,27 @@ share.
   account, and verified at the destination against Dropbox's own
   `content_hash` (§21). This is the sentence v0.4 existed to make true, and it
   took three fixes after the milestone's code was written.
-- **Four §23 error shapes, as diagnosis rather than as fixtures.** `409`
-  with no mapped tag, `path/not_folder`, and the two failures above were all
-  first seen on a real account. What CI knows about them is a guess (below).
+- **Sixteen routes, captured verbatim** (2026-09-24). Every route the adapter
+  uses, plus every error it can provoke without harming the account, recorded
+  by `:tools:dropbox-capture` with ids and paths pseudonymised and hashes kept.
+  The offline tests replay these, so `docs/testing.md` rule 1 is met rather
+  than merely written down: CI now checks that the adapter agrees with Dropbox,
+  not that it agrees with me.
+
+  One hand-written fixture was wrong, and the way it was wrong is the point.
+  `path/not_folder/...` — with an elided ellipsis — where Dropbox sends
+  `path/not_folder/`. That is the *second* invented ellipsis in an
+  `error_summary` in this project; `errors/README.md` records the first. The
+  test asserted my guess, so the guess passed for a week.
+
+  The captures also showed that Dropbox answers a malformed path with **plain
+  prose and no JSON at all**, so §23's `malformed_path` branch never fires for
+  the case it was written for, and the only diagnostic is a body that quotes
+  the rejected path — §26 keeps it out of the message, which now says the body
+  was not JSON instead of just naming the status.
 
 ### Only against the fake, or only against MockWebServer
 
-- **Every offline fixture except one.** `docs/testing.md` rule 1 says a
-  recorded test replays what the service sent, and is explicit that a
-  hand-written approximation does not count. Right now only
-  `errors/upload_insufficient_space_409.json` meets that bar. Everything in
-  `providers/dropbox/src/test/resources/fixtures/` is **shaped by hand and
-  unverified**, and its README says so at the top. The capture tool that
-  replaces them exists —
-  `./gradlew :tools:dropbox-capture:captureDropboxFixtures` — and has not been
-  run, because it needs a live scratch account. Until it is, the offline tests
-  prove that the adapter is self-consistent, not that it agrees with Dropbox.
-  That distinction is not academic: both of this milestone's adapter bugs were
-  a plausible guess about a response shape that differed from the real one in
-  exactly the way that mattered.
 - **A transfer running through Dropbox under load.** Every §22 behaviour —
   pause, resume, cancel one file mid-upload, retry — is covered against the
   fake with the §31.3 delay injections. A real transfer has now completed, but
@@ -320,7 +322,13 @@ share.
   a phone, and cannot run in CI — but it has now run there successfully, which
   is a different thing from untested (see below).
 - **Rate limits, throttling and `Retry-After`.** The §23 mapping is tested
-  against synthetic bodies. No real 429 has been seen.
+  against synthetic bodies. No real 429 has been seen, and it cannot be
+  provoked to order — the fixtures README says so rather than inventing one.
+- **Paging.** `list_folder/continue` is captured but degenerate: the capture
+  asked for `limit=1` and the workspace held one entry, so Dropbox had no
+  second page to give. A listing that really sets `has_more: true` is still
+  unexercised offline. Capturing it needs a workspace seeded with more entries
+  than the limit.
 - **Large files, deep trees, awkward names.** The live suite uses small
   fixtures. Nothing has been run against a 4 GiB file or a 50,000-file tree.
 
