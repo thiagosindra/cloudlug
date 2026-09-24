@@ -1,38 +1,39 @@
 # Captured Dropbox responses
 
-Written by `./gradlew :tools:dropbox-capture:captureDropboxFixtures`. Do not edit
-by hand: a fixture is only worth having if it is what the service actually sent
+Written by `./gradlew :tools:dropbox-capture:captureDropboxFixtures`. Do not edit by hand:
+a fixture is only worth having if it is what the service actually sent
 (`docs/testing.md` rule 1).
 
-## Not captured by the last run
+Object ids, account ids and paths are replaced with stable pseudonyms — the same
+real id maps to the same pseudonym across every file, so the containment the
+enumeration tests check survives. Upload session ids and `list_folder`
+cursors are replaced too, keeping their original length and character set so
+the bodies still parse the way the captured ones did. `rev`, `content_hash`
+and timestamps are kept verbatim: neither names a person or a place, and the
+hashes are what §21's verification asserts against. Every name in these files
+was created by the capture tool, so no real filename appears.
 
-**Every file below is hand-written and unverified.** No capture run has produced
-them yet, because the tool needs a live scratch account and the environment this
-milestone was written in has no token. They are shaped from Dropbox's documented
-types and from the two responses this project has seen for real, and they are
-here so the offline tests have somewhere to load from — not because anyone has
-seen Dropbox send them.
+JSON cannot carry an HTTP status, and §23 maps on the status as well as the
+body, so the status is recorded here.
 
-Treat every byte as a guess until the table above exists. The reason to care is
-on the record twice: the flattened error union `DropboxErrors` was first written
-against was a reconstruction, and it was wrong in a way that broke the parser;
-and `upload_session/finish` returns a struct with no `.tag` where every other
-route returns a union member, which failed every file of the first real transfer
-(ADR-0030). Both were cases where a plausible guess and the real response
-differed in exactly the way that mattered.
-
-Running the capture task overwrites these files and replaces this section with a
-table recording the route, status and capture date of each.
-
-- `create_folder_v2_200.json`
-- `get_metadata_file_200.json`
-- `get_metadata_not_found_409.json`
-- `list_folder_200.json`
-- `list_folder_nested_200.json`
-- `list_folder_not_folder_409.json`
-- `upload_session_append_v2_200.json` — deliberately empty; the status is the whole answer
-- `upload_session_finish_200.json`
-- `upload_session_start_200.json`
+| File | Route | Status | Provenance | Note |
+| --- | --- | --- | --- | --- |
+| `create_folder_v2_200.json` | `/2/files/create_folder_v2` | 200 | captured 2026-09-24 |  |
+| `create_folder_v2_conflict_409.json` | `/2/files/create_folder_v2` | 409 | captured 2026-09-24 | a second create of the same folder |
+| `get_metadata_file_200.json` | `/2/files/get_metadata` | 200 | captured 2026-09-24 |  |
+| `get_metadata_invalid_token_401.json` | `/2/files/get_metadata` | 401 | captured 2026-09-24 |  |
+| `get_metadata_malformed_path_400.json` | `/2/files/get_metadata` | 400 | captured 2026-09-24 |  |
+| `get_metadata_not_found_409.json` | `/2/files/get_metadata` | 409 | captured 2026-09-24 |  |
+| `get_space_usage_200.json` | `/2/users/get_space_usage` | 200 | captured 2026-09-24 |  |
+| `list_folder_200.json` | `/2/files/list_folder` | 200 | captured 2026-09-24 |  |
+| `list_folder_continue_200.json` | `/2/files/list_folder/continue` | 200 | captured 2026-09-24 |  |
+| `list_folder_nested_200.json` | `/2/files/list_folder` | 200 | captured 2026-09-24 | the folder inside the workspace |
+| `list_folder_not_folder_409.json` | `/2/files/list_folder` | 409 | captured 2026-09-24 | listing a file |
+| `list_folder_paged_200.json` | `/2/files/list_folder` | 200 | captured 2026-09-24 | limit=1, so has_more is true |
+| `upload_session_append_v2_200.json` | `/2/files/upload_session/append_v2` | 200 | captured 2026-09-24 | the body is empty; the status is the whole answer |
+| `upload_session_finish_200.json` | `/2/files/upload_session/finish` | 200 | captured 2026-09-24 |  |
+| `upload_session_incorrect_offset_409.json` | `/2/files/upload_session/append_v2` | 409 | captured 2026-09-24 | appending at an offset the session has passed |
+| `upload_session_start_200.json` | `/2/files/upload_session/start` | 200 | captured 2026-09-24 |  |
 
 ## Not capturable
 

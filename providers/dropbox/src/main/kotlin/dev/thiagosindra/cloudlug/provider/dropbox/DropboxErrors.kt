@@ -85,13 +85,13 @@ internal object DropboxErrors {
             status == 429 -> fail(CloudErrorKind.THROTTLED, "rate limited by Dropbox", summary, retryAfter ?: DEFAULT_BACKOFF)
 
             status == 408 || status in 500..599 ->
-                fail(CloudErrorKind.TRANSIENT_NETWORK, unmapped(status, summary), summary, retryAfter)
+                fail(CloudErrorKind.TRANSIENT_NETWORK, unmapped(status, summary, root != null), summary, retryAfter)
 
             // §20.1/§20.2 shaped refusals: a thing that has no bytes to move.
             "unsupported_file" in tags || "unsupported_extension" in tags || "unsupported_content" in tags ->
                 fail(CloudErrorKind.UNSUPPORTED, "Dropbox cannot transfer this object as bytes", summary)
 
-            else -> fail(CloudErrorKind.PERMANENT, unmapped(status, summary), summary)
+            else -> fail(CloudErrorKind.PERMANENT, unmapped(status, summary, root != null), summary)
         }
     }
 
@@ -156,8 +156,22 @@ internal object DropboxErrors {
      * filename in it — and turns a report that needs a reproduction into one
      * that can be read.
      */
-    private fun unmapped(status: Int, summary: String): String =
-        if (summary.isBlank()) "Dropbox returned $status" else "Dropbox returned $status ($summary)"
+    private fun unmapped(status: Int, summary: String, parsed: Boolean): String = when {
+        summary.isNotBlank() -> "Dropbox returned $status ($summary)"
+
+        // Dropbox's *argument* validation answers before the route runs, in
+        // plain prose rather than a tagged union — a captured malformed path
+        // reads `Error in call to API function "files/get_metadata": Value
+        // must be a string conforming to regex (...)`. There is no tag to map
+        // on, and the prose is the only diagnostic, but §26 keeps it out of
+        // the message: this class of body quotes the argument it rejected, and
+        // that argument is a path. Naming the shape is what a reader needs to
+        // know the difference between "no case for this tag" and "there was no
+        // tag".
+        !parsed -> "Dropbox returned $status (the body was not JSON)"
+
+        else -> "Dropbox returned $status"
+    }
 
     private fun fail(
         kind: CloudErrorKind,

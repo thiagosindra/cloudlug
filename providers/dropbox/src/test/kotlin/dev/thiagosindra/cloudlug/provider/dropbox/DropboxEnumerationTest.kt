@@ -135,7 +135,12 @@ class DropboxEnumerationTest {
         val mapped = DropboxErrors.toException(409, Fixtures.raw("list_folder_not_folder_409"))
 
         assertEquals("that object is a file, not a folder", mapped.message)
-        assertEquals("path/not_folder/...", mapped.code)
+        // From the fixture, not written here. The hand-written version of this
+        // body carried "path/not_folder/..." — the elided form — and Dropbox
+        // sends "path/not_folder/". That is the second time a guess has
+        // invented an ellipsis in an error_summary; the first is recorded in
+        // ../errors/README.md.
+        assertEquals(Fixtures.field("list_folder_not_folder_409", "error_summary"), mapped.code)
     }
 
     // ------------------------------------------------------------------ helpers
