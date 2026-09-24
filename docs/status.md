@@ -1,65 +1,86 @@
-# Status — v0.4 delivered (two Dropbox accounts, and transfers between them)
+# Status — v0.5 delivered (the transfer outlives the app)
 
 What exists, what is compiled, what is verified — and what has been verified
-**against a real cloud account** rather than against a fake that agrees with
-us. As of 2026-09-22 that includes two Dropbox accounts connected from the app
-on a real phone: §8.1 end to end, on the third attempt.
+**against a real cloud account or a real device** rather than against a fake
+that agrees with us.
 
-**v0.4 is delivered.** Two Dropbox accounts connect from the app, §2.2 permits
-the pair, the wizard picks accounts on both sides and browses each account's
-tree, and **files now move between two real Dropbox accounts on a real phone**.
-Three defects stood between the milestone's code and that sentence, and all
-three lived in a *handoff* rather than in a component — each part was
-individually correct and individually tested.
+**v0.5 is background execution.** Before it, the engine ran in an
+application-scoped coroutine started by a ViewModel, which made §17's "correctness
+must never depend on any worker staying alive" false in the most direct way
+available: the transfer died with the process, and the process dies whenever
+Android wants the memory. A migration measured in hours could not survive the
+user leaving the app.
 
-**The first real Dropbox → Dropbox transfer failed**, at the Review step, with
-"Dropbox returned 409" and a transfer left stuck in PREPARING reporting
-0 / 0 files. Neither symptom was the bug. `enumerate` asked Dropbox for the
-whole subtree in one recursive call, and that response contains neither the
-selected folder nor any containment between its entries — so `ManifestBuilder`,
-which rebuilds every relative path from `parentId`, rejected the first object it
-was handed. The adapter now walks the tree a folder at a time (ADR-0029).
+It now runs where the platform can keep it alive: a User-Initiated Data Transfer
+job on API 34+, a WorkManager worker with a `dataSync` foreground service on
+26–33, both behind one three-method interface, with §16's network policy stated
+as the job's own constraint and §24.4's notification carrying the direction,
+progress, current file, and Pause and Cancel. Neither scheduler holds state —
+recovery is `SchedulingPolicy` re-read over rows (§2.4) — and the in-app
+`TransferController` the §31.3 journey drives is wrapped rather than replaced
+(ADR-0031).
 
-**Then the bytes moved, and every file still failed.** With enumeration fixed,
-a real file downloaded and uploaded correctly — and was marked `error
-permanent` the instant Dropbox committed it, with a retry finding it already
-there, "duplicate verified by hash". `upload_session/finish` answers with a
-`FileMetadata` struct, which carries no `.tag`, and the adapter read the tag as
-though every route returned a union member. It turned its own success response
-into null (ADR-0030). §31.2 has the check that would have caught this on the
-first run; it is live-only, so CI has never run it.
+**Roadmap change, ratified before the work began:** v0.5 is background
+execution and Google Drive moves to v0.6. Spec §33's table is amended in
+[`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) §9.
 
-**And the picker could not descend.** Every row toggled selection and nothing
-opened a folder, so only an account's top level could be transferred: `photos`
-could be taken whole or not at all, and a file two levels down was unreachable.
-§9 describes a browser built on `listChildren` one level at a time, which
-implies descent without ever saying so, and §24.2 never said what a row does
-when you touch it — so the picker violated nothing. Both pickers now navigate,
-and the behaviour is written down as a §24.2 proposal in
-[`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) rather than left implied.
+## What writing §31.4's first scenario found
 
-This is the third defect in a row to live in a **handoff** rather than in a
-component, and the most expensive: the Dropbox contract suite is live-only,
-`ManifestBuilder`'s tests use the fake provider, and §31.2's shared
-"parents before children" check asked whether each object's parent came
-earlier — which an object with **no** parent passes by having nothing to check.
-Both halves were green continuously while the only pairing that ships could not
-complete a single transfer.
+§31.4's first four scenarios all begin "kill the process", and **none of them
+had ever been run.** CloudLug's own `androidTest` cannot: instrumentation loads
+into the process of the package it targets, so `am force-stop` from `:app`'s
+tests takes the test down with the app. The JVM tests could not either — a
+`TestScope` cannot be killed, and cancelling one *is* the pause case.
+
+So pause stood in for process death everywhere. A pause unwinds: the coroutine
+is cancelled, every `finally` runs, and the rows describe a transfer that
+stopped tidily. Death leaves whatever happened to be written at the instant the
+process went away. Four defects lived in that gap, and all four are the project's
+recurring shape — a **handoff**, not a component (ADR-0032):
+
+1. **Recovery put an interrupted item where the engine cannot start.**
+   `recoveryStatusFor` sent `UPLOADING` to `CACHED` and left `VERIFYING` alone.
+   A file begins at `CHECKING_DESTINATION`, which neither can reach, so the next
+   run threw `IllegalItemTransitionException` and ended the whole transfer.
+2. **The upload session outlived the process.** The resuming pass reads from
+   byte zero — §19.4 computes both hashes in it — so its first chunk went to a
+   session already holding bytes and came back `incorrect_offset`, which §23
+   reads as `UPLOAD_SESSION_EXPIRED` and `RetryExecutor` raises as an exception
+   nothing caught.
+3. **A transfer stopped by the platform for want of Wi-Fi said it was running.**
+   WorkManager enforces a constraint by cancelling the worker, which the engine
+   cannot tell from a pause; the row still said `RUNNING`.
+4. **And then it never resumed.** The worker reported success, the work was
+   finished, and nothing re-applied the constraint — so §16's "resumes
+   automatically" waited for someone to open the app.
+
+**The assertion that was green for the first two** asserted that every recovery
+target is a legal transition. `CACHED` is. It never asked whether the item could
+*leave* again, which is the only thing a recovery target is for. That is the
+third vacuous assertion of the same family this project has found, and
+[`testing.md`](testing.md) rule 2 is about exactly it.
 
 Milestone definitions are in spec §33; design decisions are in
 [`decisions.md`](decisions.md), where every ADR carries a Status line recording
 whether the spec ratified or overruled it. Standing rules about how things are
-tested — including the offline-recorded-test rule this milestone produced — are
-in [`testing.md`](testing.md).
+tested are in [`testing.md`](testing.md).
 
-Spec is **v1.3**. ADRs 0019–0024 from the v0.2 report were all ratified into it;
-ADRs 0027 and 0028 from this milestone are accepted pending ratification, and
-[`spec-proposals/v1.4.md`](spec-proposals/v1.4.md) holds the spec-ready wording
-for the nine amendments this milestone produced.
+Spec is **v1.3**. ADRs 0019–0024 were ratified into it; ADRs 0027–0032 are
+accepted pending ratification, and
+[`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) holds the spec-ready wording
+for the nine amendments v0.4 and v0.5 produced — §2.2, §5, §13.1, §23, §24.2,
+§4, §17, §13.2/§22.5 and §33.
 
-Spec v1.2 resequenced §33. Room and the Compose shell are **v0.2**; the Dropbox
-adapter is **v0.3** and Google Drive **v0.4**. Earlier revisions of this file
-numbered these one lower.
+## v0.4, for the record
+
+Two Dropbox accounts connect from the app, §2.2 permits the pair, the wizard
+picks accounts on both sides and browses each account's tree, and **files move
+between two real Dropbox accounts on a real phone**. Three defects stood between
+the milestone's code and that sentence, all three in a handoff: a recursive
+`list_folder` whose response `ManifestBuilder` could not use (ADR-0029), an
+`upload_session/finish` struct the adapter read as a union and turned into a
+permanent failure (ADR-0030), and a picker that could not descend, so only an
+account's top level was reachable at all.
 
 ## How to verify
 
@@ -68,7 +89,12 @@ numbered these one lower.
 ./gradlew test                       # the JVM modules only
 ./gradlew :app:connectedDebugAndroidTest         # the §24 journeys — needs an emulator or device
 ./gradlew :core:security:connectedDebugAndroidTest   # §8.3, which only exists on a device
+./gradlew :tools:recovery-test:connectedDebugAndroidTest  # §31.4 and §16, from outside CloudLug's process
 ```
+
+The last of those installs `:app` first, on purpose: it instruments *itself* so
+it can force-stop CloudLug and live, and nothing else would put CloudLug on the
+device.
 
 Nothing above touches the network or needs a credential. The two things that do
 are manual workflows in the Actions tab — `Validate Dropbox content_hash` (§36)
@@ -77,7 +103,7 @@ and `Dropbox live contract tests` (§31.2) — each reading
 `DROPBOX_TEST_ROOT`.
 
 **"Green" means both CI jobs plus the emulator job**, not `./gradlew build`
-alone.
+alone. The emulator job runs all three connected suites above.
 
 JDK 17 or newer. `build` needs an Android SDK with platform 36; the JVM modules
 still need none, which the `jvm` CI job proves by naming them explicitly.
@@ -88,27 +114,29 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 |---|---|---|
 | `:core:model` | Identifiers, `CloudPath`, `ProviderHash`/`HashAlgorithm`, `HashCheckpoint`, transfer and item states, network policy | 17 |
 | `:providers:api` | `CloudProvider` and `ProviderCapabilities` (§5), `CloudObject` (§6), `CloudAccount` (§7), `CloudSelection` with display paths (§9), upload/download types | 7 |
-| `:core:database` | §12 entities, **Room** implementation and exported schema, §13 state machines, §15.3 chunk lifecycle, `TransferRepository`, in-memory store as the test double | 77 |
+| `:core:database` | §12 entities, **Room** implementation and exported schema, §13 state machines, §15.3 chunk lifecycle, `TransferRepository`, in-memory store as the test double | 80 |
 | `:core:hashing` | Checkpointable single-pass SHA-256 + destination-native hash (§19.4); hand-written SHA-256, SHA-1, MD5 and block-list SHA-256 | 28 |
 | `:core:storage` | Cache budget and emergency reserve (§15, §15.1), `filesDir` chunk store with orphan purging (§15.2) | 19 |
-| `:core:transfer` | Manifest builder (§10, §11, §20), collision algorithm (§19.3), retry policy (§23), verification (§21), network policy (§16), pipeline (§14), engine (§13.1, §22), `TransferController` (§35) | 79 |
-| `:providers:fake` | `FakeCloudProvider` with the §31.3 failure injections, including per-chunk read and upload delays; the §31.2 contract suite in test fixtures | 55 |
+| `:core:transfer` | Manifest builder (§10, §11, §20), collision algorithm (§19.3), retry policy (§23), verification (§21), network policy (§16), pipeline (§14), engine (§13.1, §22), `TransferController` (§35), **`SchedulingPolicy`** — which transfers have work left and what network each needs (§16, §17) | 95 |
+| `:providers:fake` | `FakeCloudProvider` with the §31.3 failure injections, including per-chunk read and upload delays; the §31.2 contract suite in test fixtures | 59 |
 | `:core:network` | The shared OkHttp stack and §26's redaction interceptor: a deny-by-default header allow-list, and no branch that can print a body | 9 |
-| `:providers:dropbox` | The adapter (§5 surface, §23 mapping, §22.5 offset recovery), PKCE and the OAuth forms (§8.1), the token endpoint, and §8.3's token source | 74 |
+| `:providers:dropbox` | The adapter (§5 surface, §23 mapping, §22.5 offset recovery), PKCE and the OAuth forms (§8.1), the token endpoint, and §8.3's token source | 95 |
 | `:core:security` | `SecretStore` and the Keystore-backed AES-GCM implementation (§8.3) | 11 instrumented |
-| `:core:auth` | §8.1's Custom Tab flow over AppAuth, the pending-attempt store, and §24.5's account records | 14 |
+| `:core:scheduling` | §17: the two platform schedulers, `TransferRunner`, §24.4's notification with its Pause and Cancel actions, the boot receiver | — |
+| `:core:auth` | §8.1's Custom Tab flow over AppAuth, the pending-attempt store, and §24.5's account records | 22 |
 | `:feature:accounts` | §24.5: connect, disconnect, and §7's granted scopes | — |
-| `:core:ui` | Material 3 theme, the §24.3 hop indicator, progress and status components, byte/count formatting | — |
+| `:core:ui` | Material 3 theme, the §24.3 hop indicator, progress and status components, byte/count formatting | 4 |
 | `:feature:home` | §24.1: active transfers and history | — |
-| `:feature:new-transfer` | §24.2: the six-step wizard, including the review step | — |
+| `:feature:new-transfer` | §24.2: the six-step wizard, including the review step | 6 |
 | `:feature:transfer-details` | §24.3: live progress, current file, per-item outcomes, §22 controls | — |
-| `:app` | `MainActivity`, navigation, Hilt graph: Room (opened here — ADR-0025), `filesDir` cache, ConnectivityManager, StatFs, the **real Dropbox provider**, two fakes for the demo and for Drive, debug crash reporter | 5 instrumented |
-| `:tools:*` | Not shipped: the §36 `content_hash` harness and the `dropbox-auth` CLI that mints a refresh token | 2 |
+| `:app` | `MainActivity`, navigation, WorkManager's configuration and JobScheduler id range, Hilt graph: Room (opened here — ADR-0025), `filesDir` cache, ConnectivityManager, StatFs, the **real Dropbox provider**, two fakes for the demo and for Drive, debug crash reporter | 10 instrumented |
+| `:tools:*` | Not shipped: the §36 `content_hash` harness, the `dropbox-auth` CLI that mints a refresh token, the §31.2 fixture capture, and `recovery-test` — an empty application that instruments itself so it can force-stop CloudLug and survive | 9 + 3 instrumented |
 
-**384 JVM tests, 0 failures**, of which 20 are the live Dropbox tests and skip
-without a credential — so **364 run hermetically**, on any machine, with no
-network. Plus **16 instrumented tests** on an emulator in CI: 5 in `:app` and 11
-in `:core:security`. `allWarningsAsErrors` is on everywhere.
+**450 JVM tests, 0 failures**, of which 22 are the live Dropbox tests and skip
+without a credential — so **428 run hermetically**, on any machine, with no
+network. Plus **24 instrumented tests** on an emulator in CI: 10 in `:app`, 11
+in `:core:security` and 3 in `:tools:recovery-test`.
+`allWarningsAsErrors` is on everywhere.
 
 ## What is verified, and on what
 
@@ -120,6 +148,22 @@ replaces said plainly that nothing had run on a device, and listed "whether the
 Hilt graph constructs" and "whether `BundledSQLiteDriver` opens a database in an
 app data directory" as the first things to check. Both were precisely what
 broke. Writing a risk down is not the same as testing it — ADR-0025.
+
+**Verified on an emulator, in CI, from outside CloudLug's own process.**
+`:tools:recovery-test` is an empty application that instruments itself. It
+walks the §24.2 wizard, waits until §24.3 says a file is genuinely moving,
+`am force-stop`s CloudLug, confirms with `pidof` that the process is gone,
+relaunches, and asserts the transfer finishes with nothing to report. That is
+§31.4's first scenario, run for real for the first time.
+
+Its sibling takes Wi-Fi away mid-transfer under UNMETERED_ONLY and asserts
+three things §16 and §24.4 promise: the transfer parks and §24.3 names the
+condition, the notification shade says the same thing, and putting Wi-Fi back
+is enough — nothing is pressed. All three were false before v0.5.
+
+**Not verified: the UIDT branch.** CI's emulator is API 30, so both scenarios
+above run against WorkManager. API 34+ is compiled and lint-clean and has never
+executed. See known gap 3.
 
 **Verified by JVM test (273, 0 failures).** Everything in `:core:*` and
 `:providers:*`: the engine, the state machines, the hash pipeline including
@@ -310,10 +354,17 @@ share.
   pause, resume, cancel one file mid-upload, retry — is covered against the
   fake with the §31.3 delay injections. A real transfer has now completed, but
   nobody has paused or cancelled one mid-file against a real account.
-- **Recovery after process death, anywhere.** §31.4's scenarios run against
-  the fake only, and the engine still runs in an app-scoped coroutine that dies
-  with the process — so no transfer longer than a screen-off interval can even
-  be attempted. That is what v0.5 is for.
+- **Recovery after process death against a real provider.** §31.4's first
+  scenario now runs for real, on an emulator, against the demo providers — a
+  genuine `am force-stop` and a genuine resume. Against Dropbox it has not run,
+  and the fake differs from Dropbox in one way that bears directly on it: the
+  fake's upload sessions read as already expired, so every resume begins a
+  fresh one. A real session does not, which is the path defect 2 above lived
+  in. The force-stop device run is one of the two things v0.5 asks of you.
+- **Reboot, on any API level.** The boot receiver reconciles from rows and is
+  covered by nothing. On 34+ the job is `setPersisted`, which the platform's
+  validation accepts alongside `setUserInitiated`, and whether it is actually
+  restored has not been observed.
 - **The browser leg, still.** The emulator test covers §24.5 up to the point
   where a Custom Tab would open, and `OAuthRedirectTest` covers the return trip
   from the point the browser hands it back. The tab itself has only ever run on
@@ -375,12 +426,20 @@ counter (§11).
    looked complete with no work in it. Silent, and indistinguishable from
    success. Both now fall back to a full walk.
 
-3. **No background execution.** §17's UIDT on API 34+ and the WorkManager
-   fallback below it are not implemented. A transfer runs in an
-   application-scoped coroutine and dies with the process; the database makes
-   that recoverable, but the OS may stop a long transfer. v0.5.
-4. **No notification.** §24.4 specifies an ongoing notification with progress
-   and controls. It arrives with the background work it belongs to.
+3. ~~**No background execution.**~~ Landed in v0.5. §17's UIDT on API 34+ and
+   the WorkManager `dataSync` worker below it, behind one interface, with §16
+   as the job's network constraint and resume driven by re-reading rows
+   (ADR-0031).
+
+   **The UIDT path has never run.** CI's emulator is API 30, so everything
+   above only exercises the WorkManager branch; the 34+ branch is compiled,
+   lint-clean and unexercised. An API 34 matrix entry is a separate PR — see
+   "What v0.6 needs from you".
+4. ~~**No notification.**~~ Landed in v0.5. §24.4's ongoing notification, with
+   direction, aggregate progress, current filename, Pause and Cancel, and a
+   waiting state that names its condition — which outlives the job that raised
+   it, because a foreground notification dies with its worker and a parked
+   transfer is precisely when the user is still owed an explanation.
 5. **The pipeline is sequential per chunk** — correct but not overlapping
    download and upload in wall-clock terms. ADR-0017; §18 says measure first.
 6. ~~**`content_hash` is validated against independently computed vectors and
@@ -424,8 +483,28 @@ counter (§11).
    because the network dropped surfaces to the transfer as an auth error rather
    than as §23's transient case.
 11. **No Google Drive.** `:providers:google-drive` is still a stub carrying TODOs
-   naming the spec sections it must satisfy. v0.4.
-12. **No Play assets.** §29 — v0.5.
+   naming the spec sections it must satisfy. **v0.6** since the roadmap change.
+12. **No Play assets.** §29.
+13. **Reboot on API 34+ is assumed, not proven.** `setPersisted` is permitted
+   alongside `setUserInitiated` — the platform's own validation confirms it —
+   and a boot receiver reconciles regardless. Whether a persisted UIDT job is
+   actually restored across a reboot has not been observed on a device, and
+   cannot be until the 34+ matrix entry exists.
+14. **Byte-level resume does not exist.** §22.1 says cached chunks are what
+   makes resuming cheap, and §14's cache is per-chunk, but the unit of resume
+   is the *item*: §19.4 computes both hashes in the single pass that reads the
+   object, so a pass cannot start anywhere but byte zero. An interrupted file
+   is re-read in full. §19.4's pipeline is checkpointable by design
+   (ADR-0004), so this is reachable — as a throughput change with its own
+   §31.4 run, not as a correctness fix. Spelt out in
+   [`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) §8 so §22.5 and §13.2
+   stop implying otherwise.
+15. **The §31.4 harness drives the UI, so it reads the screen and nothing
+   else.** There is no database to open from outside CloudLug's process and no
+   ViewModel to ask. "The transfer completed" means §24.1 or §24.3 said so.
+   That is the right trade for a recovery test — a scenario that reads its
+   answer out of the process it just killed is not testing recovery — but it
+   makes the test as brittle as the strings it matches.
 
 ## What v0.3 needed from you, and what came of it
 
@@ -445,46 +524,59 @@ any adapter existed, and you pasted back the verbatim `insufficient_space`
 error body from a failed run — which corrected a reconstruction of mine that
 had the tagged union nested where Dropbox flattens it.
 
-## What v0.4 (Google Drive) needs from you
+## What v0.5 needs from you — the two device runs
 
-Two things need your account rather than code, and one of them gates the
-others. Registration is not instant, so they are worth starting before the code
-is ready for them.
+Both are things this environment cannot do, and both are the kind of thing that
+has caught a defect every time it has been done.
 
-1. **Confirm Google's scope classification first — before any Drive code.**
-   §36 asks for this explicitly, and it is the equivalent of what the
-   `content_hash` check was for Dropbox: a misreading here is not a bug that a
-   test catches, it is a milestone built on a wrong assumption. Specifically:
-   whether `drive.file` is still classified as non-sensitive, what
-   `drive.readonly` is classified as now, and whether a CASA security
-   assessment applies at the tier CloudLug would be in. The answer decides
-   whether Drive can be a **source** at all, or only a destination — which
-   changes what v0.4 *is*.
-2. **A Google Cloud project with an OAuth client** for Android, and the SHA-1 of
-   the signing certificate the build uses. Drive's Android OAuth client is bound
-   to the package name and certificate fingerprint rather than to a redirect
-   URI, which is a different shape from Dropbox and will need its own connector.
-   As with Dropbox: **no client secret**, and none is needed.
-3. **The scope list the console shows as enabled**, stated back to me rather
-   than the list requested. §7 now drives real behaviour — the accounts row
-   says whether an account can be a source, a destination or neither — so a
-   mismatch shows up as a row that refuses work rather than as a clear error.
+1. **A multi-gigabyte transfer with the screen off, overnight.** This is the
+   only test of the sentence v0.5 exists for. What to watch for: the
+   notification still present and still moving in the morning; on Android 14+,
+   whether a `dataSync` worker hits the ~6-hour cap (it should not on 34+,
+   which uses UIDT instead, and the cap is the whole reason that branch
+   exists); and the transfer's file count matching the manifest at the end.
+2. **A force-stop mid-file**, from Settings → Apps → Force stop while a large
+   file is in flight, then reopening the app. Expect the transfer to pick up
+   where the rows left it. Two of v0.5's four defects were exactly this against
+   the emulator's fake providers; a real Dropbox session behaves differently
+   from the fake in one way that matters — its session does **not** read as
+   already expired — so this path is only lightly covered by the automated
+   tests.
 
-Useful but not blocking:
+If either fails, the useful artefacts are the §24.3 screen (which now shows the
+failed item's `lastErrorMessage`, not just its category) and the transfer's
+file counts.
 
-- **Force-stop the app and reopen it, with Dropbox connected.** The cheapest
-  remaining check, and it exercises the one §8.3 path nothing has: reading the
-  refresh token back out of Keystore in a new process. If the accounts row is
-  still there and a transfer can start, the credential survived. If the row is
-  there and the transfer fails with `AUTH_REQUIRED`, the credential did not —
-  and that difference is currently invisible on screen, because the row is
-  drawn from Room and the credential is not (see gap 9).
-- A **test Dropbox account with awkward data**: deep trees, many small files, a
-  file over 4 GiB, names with trailing dots and non-ASCII characters. The live
-  suite currently uses small fixtures, so the §20.4 name rules and the chunked
-  upload path have never met anything difficult. Please do not send
-  credentials; a description of the tree is enough for me to mirror it in the
-  fake.
-- **A second Dropbox account**, if you want Dropbox-to-Dropbox to be the first
-  real end-to-end transfer rather than waiting for Drive. It needs gap 7 above
-  fixed first, which is v0.4 work either way.
+## What v0.6 (Google Drive destination) needs from you
+
+Two things need your account rather than code, and one gates the other.
+Registration is not instant, so they are worth starting before the code is.
+
+1. **Confirm Google's scope classification, before any Drive code.** As of
+   2026-09-21, out of band: `drive.file` non-sensitive, `drive.readonly`
+   restricted with annual CASA. That is what makes Drive destination-only in
+   the Play build (§8.2), and it is worth re-confirming because it is the one
+   input that could invalidate the milestone's shape rather than its schedule.
+2. **A Google Cloud project with an OAuth client for Android**, package
+   `dev.thiagosindra.cloudlug` and the debug signing certificate's SHA-1, with
+   the Drive API enabled and `drive.file` requested. **No client secret** —
+   §8.1 is PKCE-only, the same as Dropbox, and I will not ask for one.
+3. **A scratch Google account** and a `DRIVE_TEST_ROOT` folder inside it, the
+   way `DROPBOX_TEST_ROOT` works today: the live contract gate refuses to run
+   without it and never addresses the account root.
+
+And one thing I would ask for, which is not blocking:
+
+4. **A second fixture-capture run against Dropbox seeding more than one entry
+   in the workspace**, so `list_folder` paging is non-degenerate. The last run
+   asked for `limit=1` against a workspace holding one object, so `has_more`
+   came back `false` and the continue route returned nothing. A real multi-page
+   listing is still unexercised offline, and paging is where §11's cursor
+   resume lives.
+
+Finally, one decision that is yours: **the API 34+ emulator matrix entry.** It
+is the only way to exercise the UIDT branch in CI, and it is its own PR because
+an API 34 AVD has failed to boot on these runners before. If it cannot be made
+reliable, the honest outcome is to say so here and accept UIDT as
+device-verified only — which is a real reduction in confidence, since UIDT is
+the branch that runs on every phone shipping today.
