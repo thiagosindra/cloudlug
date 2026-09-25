@@ -26,6 +26,11 @@ output.json
 *.jks
 *.keystore
 keystore.properties
+# The one exception, and it is deliberate: the debug key is committed so that
+# every contributor and CI produce the same certificate SHA-1, which is what a
+# Google OAuth client for Android is registered against. It signs debug builds
+# only. See docs/oauth.md.
+!app/debug.keystore
 google-services.json
 secrets.properties
 

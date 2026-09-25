@@ -112,6 +112,11 @@ jobs:
             exit 1
           fi
 
+      # Signed with the committed app/debug.keystore, like every contributor's
+      # build, so this artifact's certificate SHA-1 is the one registered with
+      # the OAuth providers (docs/oauth.md). `build` above runs
+      # verifyDebugFingerprint, which fails if that document stops naming the
+      # key — so a CI pass is also a check that the instructions are current.
       - name: Upload the debug APK
         uses: actions/upload-artifact@v4
         with:

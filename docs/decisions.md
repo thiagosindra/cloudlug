@@ -981,3 +981,62 @@ one, and `docs/decisions.md` ADR-0004 keeps the door open — would make
 byte-level resume possible and `CACHED` a real resume point again. That is a
 throughput change, not a correctness one, and it would need its own §31.4 run
 before it could be believed.
+
+---
+
+## ADR-0033 — The debug signing key is committed; the release key is not
+
+**Status.** Accepted in v0.5.1, pending spec ratification (§30 amendment in
+`spec-proposals/v1.5.md` §10).
+
+**Context.** A Google OAuth client for Android is registered against two
+things: the package name and the signing certificate's SHA-1. Android's
+tooling generates a debug keystore per machine on first use, so without a
+decision here every contributor signs with a different certificate.
+
+The consequence is not a minor inconvenience. Each contributor would need
+their own OAuth client, CI would need another, and a sign-in verified on one
+machine would fail on the next — at the authorization step, with a redirect
+error that mentions neither signing nor the key. That is the shape of failure
+this project keeps paying for: a handoff between two correct things, where
+neither side's diagnostics name the seam.
+
+**Decision.** `app/debug.keystore` is committed, with the Android defaults
+(store and key password `android`, alias `androiddebugkey`), and `:app` signs
+debug builds with it. Its SHA-1 is published in `docs/oauth.md` beside the
+registration steps, printed on every debug assemble, and checked by
+`verifyDebugFingerprint` as part of `check`.
+
+**Why this is safe.** The debug certificate grants no authority. It signs
+debug builds only; its password is the documented Android default; the
+platform's own default debug key is equally public; and an equivalent
+certificate can be extracted from any debug APK that has ever been built.
+Publishing the fingerprint discloses nothing that installing a debug build
+would not.
+
+**What it must not become.** No release signing config exists in the build.
+A release is signed by whoever ships it, with a key they hold, and that
+certificate's fingerprint stays out of the repository as well —
+`CONTRIBUTING.md` says so under the same heading, so the two facts are read
+together rather than one at a time. `.gitignore` still excludes `*.keystore`
+and `*.jks`; `app/debug.keystore` is a single explicit exception written as
+one, so a second requires a deliberate edit rather than a pattern that has
+quietly widened.
+
+**Why the fingerprint is verified rather than trusted.** It is transcribed
+into a console by hand, and a stale one fails in a way that does not describe
+itself. A document that drifts from the key it describes is worse than no
+document, so `check` fails when it does. Same reasoning as the committed Room
+schema: the build asserts the thing a reviewer would otherwise have to notice.
+
+**Alternatives rejected.** Generating a keystore from a committed seed at
+build time hides the artefact without changing what is disclosed, and adds a
+build step that can fail. Keeping the debug key out and asking each
+contributor to register their own OAuth client is the status quo this replaces
+— it works, and it costs every contributor an hour and makes "it works on my
+machine" literally true.
+
+**What changes it.** A provider that keys its client on something other than a
+certificate fingerprint would not need this. Dropbox already does not: it
+matches on the redirect URI, which is why the fingerprint is irrelevant to its
+half of `docs/oauth.md`.
