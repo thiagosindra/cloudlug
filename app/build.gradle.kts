@@ -1,5 +1,5 @@
-import dev.thiagosindra.cloudlug.build.DebugSigningReport
-import dev.thiagosindra.cloudlug.build.VerifyDebugFingerprint
+import dev.thiagosindra.cloudlug.buildlogic.DebugSigningReport
+import dev.thiagosindra.cloudlug.buildlogic.VerifyDebugFingerprint
 
 plugins {
     id("com.android.application")
