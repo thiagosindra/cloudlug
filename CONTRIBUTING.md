@@ -76,7 +76,9 @@ permanent and all of them are searchable.
 - display names, real or borrowed;
 - real cloud paths or filenames. Every path and name in a fixture or a test is
   one this project invented or the capture tool created;
-- keystore fingerprints — the SHA-1 or SHA-256 of a signing certificate;
+- keystore fingerprints — the SHA-1 or SHA-256 of a **release** signing
+  certificate. The debug certificate is the deliberate exception and is
+  published in `docs/oauth.md`; see [Signing keys](#signing-keys);
 - device identifiers, including the **model number** of a phone you tested on.
   "a Samsung phone running Android 16" says everything a bug report needs.
 
@@ -106,6 +108,34 @@ deny-by-default header allow-list.
 commit: a deletion leaves the value in history, reachable by commit SHA, for as
 long as the repository exists. Removing it means rewriting history, and doing
 that is much cheaper before the commit is pushed than after.
+
+### Signing keys
+
+**`app/debug.keystore` is committed, and that is deliberate.** It carries the
+Android defaults — store password `android`, key password `android`, alias
+`androiddebugkey` — and `:app` signs debug builds with it, so every
+contributor and CI produce the same certificate.
+
+It has to be shared because a Google OAuth client for Android is registered
+against the package name *and* the signing certificate's SHA-1. A debug key
+generated per machine would mean one OAuth client per contributor, and a
+sign-in that works on one laptop failing on the next with an error that
+mentions neither signing nor the key. Android's own default debug key is
+equally public and uses the same password.
+
+It protects nothing. It signs debug builds only, and anyone can extract an
+equivalent certificate from any debug APK ever built. Publishing its SHA-1 in
+`docs/oauth.md` gives away nothing that installing a debug build would not.
+
+**The release key is not in this repository and never will be.** There is no
+release signing config in `app/build.gradle.kts`: a release build is signed by
+whoever ships it, with a key they hold and keep out of version control, and
+that certificate's fingerprint stays out too. `.gitignore` still excludes
+`*.keystore` and `*.jks` — `app/debug.keystore` is a single explicit
+exception, written as one, so adding a second takes a deliberate edit.
+
+Any debug build prints the fingerprint, and `verifyDebugFingerprint` — part of
+`check` — fails if `docs/oauth.md` stops naming the key it describes.
 
 ## Making a change
 

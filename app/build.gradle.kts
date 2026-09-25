@@ -1,3 +1,6 @@
+import dev.thiagosindra.cloudlug.buildlogic.DebugSigningReport
+import dev.thiagosindra.cloudlug.buildlogic.VerifyDebugFingerprint
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -28,15 +31,65 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        // Committed on purpose, and the only signing material that ever will
+        // be. A Google OAuth client for Android is keyed on the package name
+        // *and* the signing certificate's SHA-1, so a debug key that differs
+        // per machine means every contributor and CI each need their own OAuth
+        // client, and a sign-in that works on one laptop fails on the next
+        // with an error that names neither cause. One shared debug key makes
+        // §8.1 reproducible.
+        //
+        // It protects nothing: it signs debug builds only, its password is the
+        // Android default, and the platform's own default debug key is equally
+        // public. The release key is not here and never will be — see
+        // docs/oauth.md and CONTRIBUTING.md.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
-            // No shrinking yet: v0.5 is the security-review milestone (§33) and
+            // No shrinking yet: v0.6 is the security-review milestone (§33) and
             // the keep rules belong with the OkHttp and OAuth code that needs
-            // them. Debug signing only — no signing material is committed (§30).
+            // them. No release signing config: a release build is signed by
+            // whoever ships it, with a key that is not in this repository.
             isMinifyEnabled = false
         }
     }
 }
+
+private val debugKeystore = layout.projectDirectory.file("debug.keystore")
+
+val debugSigningReport = tasks.register<DebugSigningReport>("debugSigningReport") {
+    group = "verification"
+    description = "Prints the committed debug certificate's SHA-1 (docs/oauth.md)."
+    keystore.set(debugKeystore)
+    storePassword.set("android")
+    keyAlias.set("androiddebugkey")
+    fingerprintFile.set(layout.buildDirectory.file("signing/debug-sha1.txt"))
+    // Always: the value is the point of the task, and it costs milliseconds.
+    outputs.upToDateWhen { false }
+}
+
+val verifyDebugFingerprint = tasks.register<VerifyDebugFingerprint>("verifyDebugFingerprint") {
+    group = "verification"
+    description = "Fails if docs/oauth.md no longer names the committed debug certificate."
+    keystore.set(debugKeystore)
+    storePassword.set("android")
+    keyAlias.set("androiddebugkey")
+    documentation.set(rootProject.layout.projectDirectory.file("docs/oauth.md"))
+}
+
+tasks.named("check") { dependsOn(verifyDebugFingerprint) }
+
+// `matching`, not `named`: AGP registers assembleDebug while creating variants,
+// which is after this script is evaluated.
+tasks.matching { it.name == "assembleDebug" }.configureEach { finalizedBy(debugSigningReport) }
 
 dependencies {
     implementation(project(":core:ui"))

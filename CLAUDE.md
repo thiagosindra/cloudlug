@@ -29,7 +29,12 @@ Never write, in any of those places:
 - **display names**, real or borrowed;
 - **real cloud paths or filenames.** Every path and name in a fixture or test
   is invented or was created by the capture tool;
-- **keystore fingerprints** — a signing certificate's SHA-1 or SHA-256;
+- **release keystore fingerprints** — a release signing certificate's SHA-1
+  or SHA-256, and the key itself. The **debug** key is the one deliberate
+  exception: `app/debug.keystore` is committed and its SHA-1 is published
+  in `docs/oauth.md`, because a Google OAuth client for Android is keyed on
+  the package name and that fingerprint, so it has to be the same for
+  everyone. It signs debug builds only and protects nothing;
 - **device identifiers, including a phone's model number.** Write "a Samsung
   phone running Android 16"; the model earns a bug report nothing.
 
