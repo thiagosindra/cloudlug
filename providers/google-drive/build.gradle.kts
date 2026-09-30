@@ -2,7 +2,8 @@ plugins {
     id("cloudlug.jvm-module")
 }
 
-// Stub module — no adapter code in v0.1. See docs/status.md.
+// v0.6 Step 1: only GoogleOAuth, which the Drive tools reuse. The adapter
+// follows once real hashes match and fixtures exist (docs/testing.md).
 dependencies {
     api(project(":providers:api"))
 
