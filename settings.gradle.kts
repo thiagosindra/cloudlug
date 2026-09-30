@@ -39,6 +39,10 @@ include(":tools:dropbox-hash-check")
 include(":tools:dropbox-auth")
 include(":tools:dropbox-capture")
 include(":tools:recovery-test")
+include(":tools:drive-common")
+include(":tools:drive-auth")
+include(":tools:drive-hash-check")
+include(":tools:drive-capture")
 
 // Android modules from spec §4 and the §24 screens.
 include(

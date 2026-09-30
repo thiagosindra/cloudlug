@@ -61,7 +61,12 @@ jobs:
             :providers:fake:test \
             :core:network:test \
             :providers:dropbox:test \
-            :tools:dropbox-hash-check:test
+            :providers:google-drive:test \
+            :tools:dropbox-hash-check:test \
+            :tools:drive-common:test \
+            :tools:drive-auth:test \
+            :tools:drive-hash-check:test \
+            :tools:drive-capture:test
 
       - name: Upload test reports
         if: failure()

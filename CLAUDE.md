@@ -48,13 +48,20 @@ pass. Session ids and cursors are not credentials, and are replaced anyway —
 "inert" and "not mine to publish" are different tests, and only the second one
 governs a public repository.
 
-**Credentials only ever come from the environment.** `DROPBOX_REFRESH_TOKEN`
-and `DROPBOX_TEST_ROOT` as environment variables locally, repository secrets in
-CI. Never a file — not `local.properties`, not `secrets.properties`, not a
-Gradle property — and never a commit. Never ask the maintainer for an app
-secret: CloudLug is a public client, PKCE-only, and no client secret exists.
-The committed Dropbox app key is a public identifier, visible in every
-authorization URL a user ever sees.
+**Credentials only ever come from the environment.** `DROPBOX_REFRESH_TOKEN`,
+`DROPBOX_TEST_ROOT`, `DRIVE_REFRESH_TOKEN`, `DRIVE_TEST_ROOT` and
+`DRIVE_TOOL_CLIENT_SECRET` as environment variables locally, repository
+secrets in CI. Never a file — not `local.properties`, not `secrets.properties`,
+not a Gradle property — and never a commit.
+
+**The app has no client secret.** CloudLug is a public client, PKCE-only: the
+Dropbox app key and the Google Android client id are public identifiers,
+visible in every authorization URL a user ever sees, and neither has a secret.
+The one secret in the project belongs to the **Desktop OAuth client the Drive
+tools use** — Google requires it at the token endpoint even under PKCE, and an
+Android client cannot run the tools' loopback redirect. It exists only in
+`DRIVE_TOOL_CLIENT_SECRET` at runtime, is never compiled into the app, and is
+never asked for: the maintainer sets it where it is needed.
 
 Spec §26 governs logging: no tokens, authorization headers, file contents or
 filenames, ever. `:core:network`'s redaction interceptor enforces it with a

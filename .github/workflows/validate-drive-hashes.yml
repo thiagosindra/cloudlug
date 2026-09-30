@@ -1,0 +1,53 @@
+# Manual only. Spec §36 asks for Drive's md5Checksum / sha256Checksum to be
+# checked against a real account at the *start* of the Drive milestone; this
+# makes a re-check something anyone can trigger from the Actions tab.
+#
+# Never runs on push or pull_request: it needs a live token and the network,
+# and CI stays hermetic.
+name: Validate Drive checksums
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: md5Checksum and sha256Checksum against a real account (§36)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Fails in seconds with a reason rather than in the tool.
+      - name: Require the secrets
+        env:
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          DRIVE_TOOL_CLIENT_SECRET: ${{ secrets.DRIVE_TOOL_CLIENT_SECRET }}
+          DRIVE_TEST_ROOT: ${{ secrets.DRIVE_TEST_ROOT }}
+        run: |
+          missing=""
+          [ -z "$DRIVE_REFRESH_TOKEN" ] && missing="$missing DRIVE_REFRESH_TOKEN"
+          [ -z "$DRIVE_TOOL_CLIENT_SECRET" ] && missing="$missing DRIVE_TOOL_CLIENT_SECRET"
+          [ -z "$DRIVE_TEST_ROOT" ] && missing="$missing DRIVE_TEST_ROOT"
+          if [ -n "$missing" ]; then
+            echo "::error::Repository secrets not set:$missing. Add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      # The named-file case needs bytes this tool did not generate. On a runner
+      # the nearest such file is one from the checkout: the Gradle wrapper jar,
+      # a binary nobody here wrote. See tools/drive-hash-check/README.md.
+      - name: Validate
+        env:
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          DRIVE_TOOL_CLIENT_SECRET: ${{ secrets.DRIVE_TOOL_CLIENT_SECRET }}
+          DRIVE_TEST_ROOT: ${{ secrets.DRIVE_TEST_ROOT }}
+          DRIVE_HASH_CHECK_FILE: ${{ github.workspace }}/gradle/wrapper/gradle-wrapper.jar
+        run: ./gradlew :tools:drive-hash-check:validateDriveHashes --console=plain
