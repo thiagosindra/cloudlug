@@ -1,29 +1,14 @@
 package dev.thiagosindra.cloudlug.provider.dropbox
 
 import dev.thiagosindra.cloudlug.provider.AccountRoles
-import java.security.MessageDigest
+import dev.thiagosindra.cloudlug.provider.Pkce
 import java.security.SecureRandom
-import java.util.Base64
 
 /**
- * The PKCE material for one authorization attempt (RFC 7636).
- *
- * [verifier] is the secret. It never leaves the device and never appears in a
- * log (§26 redacts `code_verifier` by name); only [challenge] is sent with the
- * authorization request, and only [verifier] is sent with the exchange. That is
- * the whole point of PKCE: an attacker who intercepts the redirect gets a code
- * that is useless without a secret they never saw.
- *
- * [state] is unrelated to PKCE and exists for §8.4: the redirect that comes back
- * must carry the state this attempt sent, or it is not ours and the code in it
- * is not trusted.
+ * Moved to `:providers:api` in v0.6 so Google Drive runs the same RFC 7636 code;
+ * the alias keeps every Dropbox caller compiling unchanged.
  */
-data class PkceChallenge(
-    val verifier: String,
-    val challenge: String,
-    val state: String,
-    val method: String = "S256",
-)
+typealias PkceChallenge = dev.thiagosindra.cloudlug.provider.PkceChallenge
 
 /**
  * Dropbox OAuth 2 with PKCE and no client secret.
@@ -57,24 +42,8 @@ object DropboxOAuth {
         "files.content.write",
     )
 
-    private val encoder: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
-
-    /**
-     * A fresh verifier, challenge and state.
-     *
-     * The verifier is 32 random bytes rendered base64url, which lands at 43
-     * characters — the shortest RFC 7636 allows, and well inside its 128
-     * ceiling. Base64url is used rather than picking from the unreserved set by
-     * hand because a hand-rolled alphabet is where modulo bias creeps in.
-     */
-    fun newChallenge(random: SecureRandom = SecureRandom()): PkceChallenge {
-        val verifier = encoder.encodeToString(ByteArray(32).also(random::nextBytes))
-        return PkceChallenge(
-            verifier = verifier,
-            challenge = challengeFor(verifier),
-            state = encoder.encodeToString(ByteArray(16).also(random::nextBytes)),
-        )
-    }
+    /** A fresh verifier, challenge and state; see [Pkce.newChallenge]. */
+    fun newChallenge(random: SecureRandom = SecureRandom()): PkceChallenge = Pkce.newChallenge(random)
 
     /**
      * §7: what these granted scopes let an account do.
@@ -93,9 +62,7 @@ object DropboxOAuth {
         canBeDestination = "files.content.write" in grantedScopes,
     )
 
-    /** `BASE64URL(SHA256(ASCII(verifier)))`, unpadded — RFC 7636 §4.2. */
-    fun challengeFor(verifier: String): String =
-        encoder.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray(Charsets.US_ASCII)))
+    fun challengeFor(verifier: String): String = Pkce.challengeFor(verifier)
 
     /**
      * The URL to open in a browser.
@@ -144,20 +111,10 @@ object DropboxOAuth {
         "client_id" to APP_KEY,
     )
 
-    fun formBody(fields: Map<String, String>): String =
-        fields.entries.joinToString("&") { (k, v) -> "$k=${urlEncode(v)}" }
+    fun formBody(fields: Map<String, String>): String = Pkce.formBody(fields)
 
-    /**
-     * §8.4: a redirect is only ours if it carries the state we sent.
-     *
-     * Constant-time so a mismatch cannot be probed by timing, which costs
-     * nothing here and removes the need to think about it again.
-     */
-    fun statesMatch(expected: String, returned: String?): Boolean {
-        if (returned == null || expected.length != returned.length) return false
-        return MessageDigest.isEqual(expected.toByteArray(Charsets.UTF_8), returned.toByteArray(Charsets.UTF_8))
-    }
+    /** §8.4; see [Pkce.statesMatch]. */
+    fun statesMatch(expected: String, returned: String?): Boolean = Pkce.statesMatch(expected, returned)
 
-    private fun urlEncode(value: String): String =
-        java.net.URLEncoder.encode(value, Charsets.UTF_8).replace("+", "%20")
+    private fun urlEncode(value: String): String = Pkce.urlEncode(value)
 }

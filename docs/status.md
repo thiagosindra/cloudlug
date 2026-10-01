@@ -24,6 +24,35 @@ recovery is `SchedulingPolicy` re-read over rows (§2.4) — and the in-app
 execution and Google Drive moves to v0.6. Spec §33's table is amended in
 [`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) §9.
 
+## v0.6 in progress — Step 1: the Drive tools
+
+v0.6 is Google Drive as a destination. Following `docs/testing.md`'s "wire
+first, code second", the first PR adds only the tools that put real requests on
+the wire, and `GoogleOAuth`, which they share with the app to come:
+
+- `tools/drive-auth` — PKCE and a loopback redirect against the Desktop tooling
+  client; prints the refresh token alone on stdout, and finds or creates the
+  `cloudlug-contract-tests` test root among files this project can see.
+- `tools/drive-hash-check` — §36: 1 byte, 256 KiB, 8 MiB, ~10 MiB and a local
+  file, uploaded the way the adapter will (resumable, 8 MiB chunks), compared
+  against `:core:hashing` in both the finishing response and `files.get`.
+- `tools/drive-capture` — every route the adapter will use and every error it
+  can provoke, pseudonymized, refusing to write if a real value survives.
+
+**Run against real Google so far:** only that Google accepts the Desktop
+client's authorization request. It answers the URL `drive-auth` builds with its
+sign-in page rather than an error. That covers the client id, the loopback
+redirect and the PKCE parameters. Nothing has touched a Drive account yet.
+The hash check waits on a token minted by the maintainer.
+
+**Two `drive.file` facts changed the plan before any code depended on it**
+([`spec-proposals/v1.6.md`](spec-proposals/v1.6.md) §1–2). A folder or file
+made outside CloudLug is invisible, so the test root is created by the tools,
+§36's "existing file" case is a local file, and Drive's destination picker
+offers only My Drive and CloudLug's own folders. **One question is open for
+Step 2** (v1.6 §4): Google now documents custom URI schemes as unsupported for
+Android clients, which is the redirect §8.4 and the plan assume.
+
 ## What writing §31.4's first scenario found
 
 §31.4's first four scenarios all begin "kill the process", and **none of them
@@ -128,6 +157,7 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 | `:core:transfer` | Manifest builder (§10, §11, §20), collision algorithm (§19.3), retry policy (§23), verification (§21), network policy (§16), pipeline (§14), engine (§13.1, §22), `TransferController` (§35), **`SchedulingPolicy`** — which transfers have work left and what network each needs (§16, §17) | 95 |
 | `:providers:fake` | `FakeCloudProvider` with the §31.3 failure injections, including per-chunk read and upload delays; the §31.2 contract suite in test fixtures | 59 |
 | `:core:network` | The shared OkHttp stack and §26's redaction interceptor: a deny-by-default header allow-list, and no branch that can print a body | 9 |
+| `:providers:google-drive` | v0.6 Step 1: `GoogleOAuth` only — the two clients, `drive.file`, scope-driven roles (§7, §8.2). The adapter follows Step 1 | 5 |
 | `:providers:dropbox` | The adapter (§5 surface, §23 mapping, §22.5 offset recovery), PKCE and the OAuth forms (§8.1), the token endpoint, and §8.3's token source | 95 |
 | `:core:security` | `SecretStore` and the Keystore-backed AES-GCM implementation (§8.3) | 11 instrumented |
 | `:core:scheduling` | §17: the two platform schedulers, `TransferRunner`, §24.4's notification with its Pause and Cancel actions, the boot receiver | — |
@@ -138,7 +168,7 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 | `:feature:new-transfer` | §24.2: the six-step wizard, including the review step | 6 |
 | `:feature:transfer-details` | §24.3: live progress, current file, per-item outcomes, §22 controls | — |
 | `:app` | `MainActivity`, navigation, WorkManager's configuration and JobScheduler id range, Hilt graph: Room (opened here — ADR-0025), `filesDir` cache, ConnectivityManager, StatFs, the **real Dropbox provider**, two fakes for the demo and for Drive, debug crash reporter | 10 instrumented |
-| `:tools:*` | Not shipped: the §36 `content_hash` harness, the `dropbox-auth` CLI that mints a refresh token, the §31.2 fixture capture, and `recovery-test` — an empty application that instruments itself so it can force-stop CloudLug and survive | 9 + 3 instrumented |
+| `:tools:*` | Not shipped: the §36 `content_hash` harness, the `dropbox-auth` CLI that mints a refresh token, the §31.2 fixture capture, and `recovery-test` — an empty application that instruments itself so it can force-stop CloudLug and survive. v0.6 adds `drive-auth`, `drive-hash-check` and `drive-capture` over a shared `drive-common` | 33 + 3 instrumented |
 
 **450 JVM tests, 0 failures**, of which 22 are the live Dropbox tests and skip
 without a credential — so **428 run hermetically**, on any machine, with no

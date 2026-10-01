@@ -5,11 +5,17 @@ own, because a provider application is an identity — rate limits, review statu
 and scope grants all attach to it — and because §30 keeps registration
 instructions in documentation rather than credentials in the repository.
 
-Nothing on this page is a secret. CloudLug is a **public client**: it uses
-OAuth 2 authorization code with PKCE and has no client secret anywhere, in the
-repository, in the APK, or on any machine (§8.1). If a registration flow offers
-you a client secret, you have picked the wrong client type — go back and choose
-the one for a native or Android application.
+Nothing on this page is a secret. **The app** is a public client: it uses OAuth
+2 authorization code with PKCE and has no client secret, in the repository or
+in the APK (§8.1). If registering the *app's* client offers you a secret, you
+have picked the wrong client type — go back and choose Android.
+
+**The Drive tools** are the one exception, and they are not the app. They need
+a Desktop client (see [Google Drive](#google-drive)), and Google requires a
+Desktop client's `client_secret` at the token endpoint even under PKCE. That
+secret exists only in `DRIVE_TOOL_CLIENT_SECRET`, in the environment of the
+command that runs a tool, and as a repository secret for the manual workflows.
+Never in a file, never in a commit, never in the APK.
 
 ## The debug signing certificate
 
@@ -54,8 +60,16 @@ fails for no stated reason.
 
 ## Google Drive
 
-Drive is **v0.6**; these steps are here so registration, which is not instant,
-can start before the code needs it.
+Drive is **v0.6**. CloudLug's own registration is one Google Cloud project
+holding two OAuth clients:
+
+| Client | Id (public) | Used by | Secret |
+|---|---|---|---|
+| Android | `17997718186-fjt7n8oehpagku3dio8rcqt0fbc5ssuh.apps.googleusercontent.com` | the app (`GoogleOAuth.ANDROID_CLIENT_ID`) | none — Google issues none for Android |
+| Desktop | `17997718186-k07nk3kp29pedomv7fk8o5u14799rt5v.apps.googleusercontent.com` | `tools/drive-*` only (`DriveTooling.DESKTOP_CLIENT_ID`) | `DRIVE_TOOL_CLIENT_SECRET`, at runtime only |
+
+The Android client is registered against the debug SHA-1 above. To register
+your own:
 
 1. **Google Cloud console** → create a project (or pick yours) →
    **APIs & Services → Library** → enable the **Google Drive API**.
@@ -72,13 +86,68 @@ can start before the code needs it.
    - **Package name**: `dev.thiagosindra.cloudlug`
    - **SHA-1 certificate fingerprint**: the SHA-1 above
    - No client secret is issued for an Android client. That is correct.
-5. For a **release** build, add a second Android client with the same package
+5. **Credentials → Create credentials → OAuth client ID → Desktop app**, for
+   the tools. Google shows a client secret for it; keep it in a password
+   manager and export it as `DRIVE_TOOL_CLIENT_SECRET` only for the command
+   that needs it. Both clients must be in the **same project** (see below).
+6. For a **release** build, add a second Android client with the same package
    name and your own release certificate's SHA-1. Do not put that fingerprint
    in this repository.
 
 An Android OAuth client with the wrong SHA-1 fails at the authorization step
 with a redirect error that does not mention signing. If sign-in fails and the
 fingerprint is the thing you changed, that is the thing to check.
+
+### Why the tools need a second client
+
+Google retired the out-of-band flow (the code shown on screen, which is how
+`tools/dropbox-auth` works) in 2022, and disallows loopback redirects for
+Android clients. A terminal tool therefore needs a Desktop client, and a
+Desktop client's token exchange needs its secret. The app never uses it.
+
+### What `drive.file` can see
+
+`drive.file` grants access only to files created by this project's OAuth
+clients, or opened with the app through the Google Picker — which is web-only
+(§8.2). Everything else in the account is invisible: a `files.get` answers
+`404`, and a `files.list` leaves it out. Three consequences, all accepted for
+v0.6 and written up in [`spec-proposals/v1.6.md`](spec-proposals/v1.6.md):
+
+- **The test root is created by the tools**, not by hand. `drive-auth` finds a
+  `cloudlug-contract-tests` folder among those it can see or creates one; a
+  folder of that name made in the Drive web UI is invisible to it.
+- **§36's "an existing file" hash case uses a local file** the tool uploads.
+  A file some other client uploaded cannot be read at all.
+- **The destination picker shows My Drive and CloudLug's own folders only.**
+  The review step says the folder will be created at the top of My Drive and
+  can be moved afterwards in Drive.
+
+Google's documentation does not say whether per-file `drive.file` access is
+shared between OAuth clients of the **same project**. Keeping both clients in
+one project is the configuration that makes the tools' test root and the app's
+folders comparable; whether the app can see a folder the tools created is
+recorded as unverified in `docs/status.md` until a device shows it.
+
+### Scope classification, checked 2026-09-30
+
+§36 asks for this before any Drive code. Google's Drive scope page
+(`developers.google.com/workspace/drive/api/guides/api-specific-auth`) lists
+`drive.file` as **non-sensitive** and `drive` and `drive.readonly` as
+**restricted**, with a security assessment required for restricted-scope data.
+That matches §8.2.
+
+### Open for Step 2: the Android redirect
+
+Google's native-app guide now says **"Custom URI schemes are no longer
+supported on Android and Chrome apps"**, and that loopback redirects on mobile
+are deprecated. §8.4 and the v0.6 plan assume AppAuth with a Custom Tab and the
+reverse-client-id scheme (`com.googleusercontent.apps.<id>:/oauth2redirect`).
+Whether this Android client accepts that redirect — some consoles expose it as
+an "Enable custom URI scheme" advanced setting on the Android client — has to
+be settled before the connector is written, because the documented
+alternative (Google Identity Services' authorization client) does not go
+through a browser at all and would change §8.4. Recorded in
+[`spec-proposals/v1.6.md`](spec-proposals/v1.6.md).
 
 ## Dropbox
 
@@ -101,6 +170,8 @@ redirect URI — so the fingerprint above is irrelevant here.
 ## Credentials at runtime
 
 Never in a file, never in a commit. The live tools and the §31.2 contract gate
-read `DROPBOX_REFRESH_TOKEN` and `DROPBOX_TEST_ROOT` from the environment; CI
-reads them from repository secrets. `tools/dropbox-auth` mints a refresh token
-interactively if you need one. See CONTRIBUTING.md.
+read `DROPBOX_REFRESH_TOKEN` and `DROPBOX_TEST_ROOT`, and the Drive tools read
+`DRIVE_REFRESH_TOKEN`, `DRIVE_TEST_ROOT` and `DRIVE_TOOL_CLIENT_SECRET`, from
+the environment; CI reads them from repository secrets. `tools/dropbox-auth`
+and `tools/drive-auth` mint refresh tokens interactively; the second also
+prints `DRIVE_TEST_ROOT`. See CONTRIBUTING.md.

@@ -51,9 +51,11 @@ contributor registers their own:
   project (spec §8.2).
 
 **Credentials reach the build through the environment, never through a file.**
-The live tools and the contract gate read `DROPBOX_REFRESH_TOKEN` and
-`DROPBOX_TEST_ROOT` from environment variables; CI reads them from repository
-secrets. Not `local.properties`, not `secrets.properties`, not a Gradle
+The live tools and the contract gate read `DROPBOX_REFRESH_TOKEN`,
+`DROPBOX_TEST_ROOT`, `DRIVE_REFRESH_TOKEN`, `DRIVE_TEST_ROOT` and
+`DRIVE_TOOL_CLIENT_SECRET` from environment variables; CI reads them from
+repository secrets. The last is the Drive tools' Desktop client secret — the
+app itself has none (`docs/oauth.md`). Not `local.properties`, not `secrets.properties`, not a Gradle
 property — a git-ignored file is one `git add -f`, one editor "save all", or
 one fresh clone with stale ignore rules away from being committed, and the
 rule that has no exception is easier to follow than the rule that has one.
