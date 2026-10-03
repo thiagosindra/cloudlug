@@ -12,8 +12,8 @@ import javax.inject.Singleton
  * Account rows for the demo providers, in debug builds only.
  *
  * §24.2 chooses **accounts** as of v0.4, not providers, so a provider with no
- * row in §12.4 cannot be picked at all. That is right for Google Drive, which
- * genuinely has no account — and wrong for the demo provider, whose whole
+ * row in §12.4 cannot be picked at all. That is right for a real provider,
+ * which needs a real sign-in — and wrong for the demo providers, whose whole
  * purpose is to be pickable without an account existing anywhere real.
  *
  * So the demo providers get rows. They are not pretending to be connected
@@ -45,7 +45,7 @@ class DemoAccounts @Inject constructor(
     private val demo: List<AccountEntity>
         get() = listOf(
             account(ProviderType.FAKE, "demo-source", "Demo source", "demo-source@example.invalid"),
-            account(ProviderType.GOOGLE_DRIVE, "demo-destination", "Demo destination", "demo-destination@example.invalid"),
+            account(ProviderType.FAKE_DESTINATION, "demo-destination", "Demo destination", "demo-destination@example.invalid"),
         )
 
     private fun account(provider: ProviderType, id: String, name: String, email: String) = AccountEntity(

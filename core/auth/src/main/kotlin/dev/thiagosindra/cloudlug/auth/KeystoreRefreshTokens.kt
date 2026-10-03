@@ -1,11 +1,12 @@
 package dev.thiagosindra.cloudlug.auth
 
 import dev.thiagosindra.cloudlug.model.AccountId
-import dev.thiagosindra.cloudlug.provider.dropbox.DropboxRefreshTokenStore
+import dev.thiagosindra.cloudlug.model.ProviderType
+import dev.thiagosindra.cloudlug.provider.RefreshTokenStore
 import dev.thiagosindra.cloudlug.security.SecretStore
 
 /**
- * §8.3's store, in the shape the Dropbox adapter asks for.
+ * §8.3's store for one provider's refresh tokens, keyed by account.
  *
  * The indirection earns its keep: the adapter's refresh logic — the part whose
  * failure mode is an account that stops working four hours later — is pure
@@ -19,19 +20,24 @@ import dev.thiagosindra.cloudlug.security.SecretStore
  * One key per account as of v0.4. A Dropbox-to-Dropbox transfer holds two
  * accounts of the same provider at once, so a single key would have had the
  * destination's credential overwriting the source's at connect time.
+ *
+ * One instance per provider as of v0.6, each under its own key prefix, so a
+ * Dropbox credential and a Google Drive credential can never share a key even
+ * if their account ids collided.
  */
 class KeystoreRefreshTokens(
     private val secrets: SecretStore,
-) : DropboxRefreshTokenStore {
+    private val provider: ProviderType = ProviderType.DROPBOX,
+) : RefreshTokenStore {
 
     override fun read(account: AccountId): String? =
-        secrets.get(keyFor(account)) ?: adoptLegacyCredential(account)
+        secrets.get(keyFor(account)) ?: if (provider == ProviderType.DROPBOX) adoptLegacyCredential(account) else null
 
     override fun write(account: AccountId, token: String) = secrets.put(keyFor(account), token)
 
     override fun clear(account: AccountId) {
         secrets.remove(keyFor(account))
-        secrets.remove(LEGACY_KEY)
+        if (provider == ProviderType.DROPBOX) secrets.remove(LEGACY_KEY)
     }
 
     /**
@@ -54,10 +60,15 @@ class KeystoreRefreshTokens(
         return legacy
     }
 
-    private fun keyFor(account: AccountId) = "$KEY_PREFIX${account.value}"
+    private fun keyFor(account: AccountId) = "${prefixFor(provider)}${account.value}"
 
     private companion object {
-        const val KEY_PREFIX = "dropbox.refresh-token."
+        /** Dropbox's prefix is what v0.4 wrote, so existing credentials keep being found. */
+        fun prefixFor(provider: ProviderType) = when (provider) {
+            ProviderType.DROPBOX -> "dropbox.refresh-token."
+            ProviderType.GOOGLE_DRIVE -> "google-drive.refresh-token."
+            ProviderType.FAKE, ProviderType.FAKE_DESTINATION -> error("demo providers hold no credential")
+        }
 
         /** What v0.3 wrote, when one process could hold one Dropbox account. */
         const val LEGACY_KEY = "dropbox.refresh-token"

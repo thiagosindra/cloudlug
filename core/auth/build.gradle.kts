@@ -22,6 +22,7 @@ dependencies {
     implementation(project(":core:transfer"))
     implementation(project(":core:security"))
     implementation(project(":providers:dropbox"))
+    implementation(project(":providers:google-drive"))
     implementation(libs.okhttp)
     implementation(libs.appauth)
     implementation(libs.kotlinx.coroutines.core)

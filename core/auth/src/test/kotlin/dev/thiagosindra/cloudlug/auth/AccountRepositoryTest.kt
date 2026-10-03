@@ -180,9 +180,9 @@ class AccountRepositoryTest {
     }
 
     @Test
-    fun `granted scopes for a provider nobody connected are empty, not an error`() = runTest {
-        assertTrue(repository.grantedScopes(ProviderType.DROPBOX).isEmpty())
-        assertNull(repository.connected(ProviderType.DROPBOX))
+    fun `granted scopes for an account nobody connected are empty, not an error`() = runTest {
+        assertTrue(repository.grantedScopes(AccountId("nobody")).isEmpty())
+        assertNull(repository.find(AccountId("nobody")))
     }
 
     @Test

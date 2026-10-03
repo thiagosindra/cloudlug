@@ -30,18 +30,22 @@ class AccountRepository(
     fun observe(): Flow<List<CloudAccount>> =
         database.accounts.observeAll().map { rows -> rows.map(AccountEntity::asCloudAccount) }
 
-    suspend fun connected(provider: ProviderType): CloudAccount? =
-        database.accounts.listAll().firstOrNull { it.provider == provider }?.asCloudAccount()
+    /**
+     * One account, by its id. Keyed by account rather than provider since
+     * v0.6: "the connected Dropbox account" stopped being a single thing in
+     * v0.4, and a provider-keyed lookup would answer for whichever row came
+     * first.
+     */
+    suspend fun find(account: AccountId): CloudAccount? = database.accounts.findById(account)?.asCloudAccount()
 
-    /** §7, for a provider that may not be connected at all. */
-    suspend fun grantedScopes(provider: ProviderType): Set<String> =
-        connected(provider)?.grantedScopes.orEmpty()
+    /** §7, for an account that may not be connected at all. */
+    suspend fun grantedScopes(account: AccountId): Set<String> = find(account)?.grantedScopes.orEmpty()
 
     /**
      * Whether this build can connect [provider] at all.
      *
      * A provider with no connector is one this version does not support yet —
-     * Google Drive until v0.4. §24.5's screen shows that as a fact rather than
+     * a demo provider, or one a later build adds. §24.5's screen shows that as a fact rather than
      * offering a Connect button that cannot work.
      */
     fun canConnect(provider: ProviderType): Boolean = provider in connectors

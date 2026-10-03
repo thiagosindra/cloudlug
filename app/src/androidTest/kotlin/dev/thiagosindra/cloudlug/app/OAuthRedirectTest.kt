@@ -9,10 +9,12 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.thiagosindra.cloudlug.app.crash.crashReporter
 import dev.thiagosindra.cloudlug.auth.PendingAuthorization
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxOAuth
+import dev.thiagosindra.cloudlug.provider.googledrive.GoogleOAuth
 import dev.thiagosindra.cloudlug.security.KeystoreSecretStore
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -112,6 +114,25 @@ class OAuthRedirectTest {
             "an unexpected redirect crashed the app; the recorded report follows",
             crashReporter(context).consumePendingReport(),
         )
+    }
+
+    /**
+     * The manifest's claim, which the tests above bypass by naming the
+     * receiver explicitly. A browser does not: it fires an implicit VIEW, and
+     * if no filter in this package matches the scheme, the consent screen
+     * finishes into nothing. Drive's scheme is written out by hand in the
+     * manifest, beside a constant in GoogleOAuth, so this is what holds the
+     * two together.
+     */
+    @Test
+    fun both_providers_redirects_resolve_to_the_receiver_in_this_package() {
+        listOf(REDIRECT_URI, GoogleOAuth.ANDROID_REDIRECT_URI).forEach { uri ->
+            val implicit = Intent(Intent.ACTION_VIEW, Uri.parse("$uri?code=x&state=y"))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+                .setPackage(context.packageName)
+            val handlers = context.packageManager.queryIntentActivities(implicit, 0).map { it.activityInfo.name }
+            assertTrue("no activity in this package claims $uri; found $handlers", RECEIVER in handlers)
+        }
     }
 
     private fun redirect(code: String, state: String): Intent =

@@ -27,8 +27,21 @@
         -->
         <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
+            android:exported="true"
             android:theme="@style/Theme.CloudLug.OAuthRedirect"
-            tools:node="merge" />
+            tools:node="merge">
+            <!--
+              Google Drive's redirect (§8.4): Google's reverse-client-id scheme
+              for the Android client, alongside the Dropbox scheme AppAuth
+              already claims. Must match GoogleOAuth.ANDROID_REDIRECT_SCHEME.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.googleusercontent.apps.17997718186-fjt7n8oehpagku3dio8rcqt0fbc5ssuh" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".app.MainActivity"
