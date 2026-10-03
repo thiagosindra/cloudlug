@@ -57,7 +57,10 @@ alphabet:
 
 - ids and `permissionId`;
 - `nextPageToken`s;
-- the `upload_id` inside each session URI.
+- every URL query parameter CloudLug did not send itself. That covers the
+  `upload_id` and `session_crd` in each session URI, and anything Drive adds
+  later. Only parameters with fixed values that CloudLug sends (`uploadType`,
+  `fields` and a few others) are kept.
 
 Each is replaced wherever it occurs, including inside error messages. The
 account's email address, display name and photo link are replaced with
@@ -68,4 +71,6 @@ The tool **refuses to write anything** in any of these cases:
 - a real value survives redaction;
 - an email address outside the reserved example domains remains;
 - anything shaped like a Google token remains;
+- a URL parameter outside that short allow-list still holds anything other
+  than a pseudonym from this run;
 - a response echoed the refresh token.

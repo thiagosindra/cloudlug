@@ -104,4 +104,38 @@ class DriveRedactionTest {
         assertTrue("\"md5Checksum\": \"0cc175b9c0f1b6a831c399e269772661\"" in redacted)
         assertTrue("\"size\": \"262144\"" in redacted && "\"version\": \"3\"" in redacted)
     }
+
+    @Test
+    fun `every parameter in a session URI is redacted unless CloudLug sent it`() {
+        // The first real capture carried a session_crd nobody had named. The
+        // values here are invented, in the shape of what came back.
+        val location = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable" +
+            "&fields=id%2Cname&upload_id=AHVrFxNotARealUploadId_0123456789-abcdefghij" +
+            "&session_crd=AHSoBRNotARealSessionCredential_0123456789-abcdefghijklmnop&x=7"
+        val redaction = harvested(location)
+
+        val redacted = redaction.redact(location)
+
+        assertFalse("NotAReal" in redacted, redacted)
+        assertFalse("&x=7" in redacted, "a short unknown value is still state: $redacted")
+        assertTrue("uploadType=resumable&fields=id%2Cname&upload_id=FIXTURE" in redacted, redacted)
+        assertEquals(location.length, redacted.length)
+        assertEquals(emptyList(), redaction.leaks(redacted))
+    }
+
+    @Test
+    fun `an unknown parameter that was never harvested is refused, not published`() {
+        // Sanity for the refusal itself: a redactor that misses a parameter
+        // must still be stopped by leaks().
+        val leaks = DriveRedaction().leaks("""{"location": "https://example.invalid/u?uploadType=resumable&novel_state=abc123"}""")
+        assertEquals(listOf("an unredacted URL parameter 'novel_state'"), leaks)
+    }
+
+    @Test
+    fun `a short query value is replaced only inside its URL`() {
+        val text = """{"size": "7", "location": "https://example.invalid/u?x=7"}"""
+        val redacted = harvested(text).redact(text)
+        assertTrue("\"size\": \"7\"" in redacted, redacted)
+        assertFalse("?x=7" in redacted, redacted)
+    }
 }
