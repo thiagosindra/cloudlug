@@ -1,0 +1,16 @@
+{
+  "files": [
+    {
+      "mimeType": "application/vnd.google-apps.folder",
+      "parents": [
+        "FIXTURE0004xxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "id": "FIXTURE0006xxxxxxxxxxxxxxxxxxxxxx",
+      "name": "nested",
+      "trashed": false,
+      "createdTime": "2026-10-03T22:37:36.715Z",
+      "modifiedTime": "2026-10-03T22:37:36.715Z",
+      "version": "1"
+    }
+  ]
+}

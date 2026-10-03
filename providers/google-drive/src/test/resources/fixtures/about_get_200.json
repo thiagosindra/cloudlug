@@ -1,0 +1,14 @@
+{
+  "user": {
+    "displayName": "Fixture Account",
+    "photoLink": "https://example.invalid/photo",
+    "permissionId": "FIXTURE0005xxxxxxxxx",
+    "emailAddress": "scratch@example.com"
+  },
+  "storageQuota": {
+    "limit": "16106127360",
+    "usage": "84740",
+    "usageInDrive": "0",
+    "usageInDriveTrash": "0"
+  }
+}

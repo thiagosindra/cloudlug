@@ -1,0 +1,12 @@
+{
+  "id": "FIXTURE0006xxxxxxxxxxxxxxxxxxxxxx",
+  "name": "nested",
+  "mimeType": "application/vnd.google-apps.folder",
+  "trashed": false,
+  "parents": [
+    "FIXTURE0004xxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "version": "1",
+  "createdTime": "2026-10-03T22:37:36.715Z",
+  "modifiedTime": "2026-10-03T22:37:36.715Z"
+}

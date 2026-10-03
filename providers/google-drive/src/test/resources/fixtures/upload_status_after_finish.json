@@ -1,0 +1,15 @@
+{
+  "id": "FIXTURE0008xxxxxxxxxxxxxxxxxxxxxx",
+  "name": "captured.bin",
+  "mimeType": "application/octet-stream",
+  "trashed": false,
+  "parents": [
+    "FIXTURE0006xxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "version": "1",
+  "createdTime": "2026-10-03T22:37:39.599Z",
+  "modifiedTime": "2026-10-03T22:37:39.599Z",
+  "md5Checksum": "72c1c65bebf24880243198d05295313a",
+  "sha256Checksum": "77918d5e8db6dcc3244ffc3280d2c159f451c6ce370d166862826d0978e78c55",
+  "size": "263144"
+}
