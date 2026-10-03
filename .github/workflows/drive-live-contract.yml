@@ -1,0 +1,84 @@
+# Manual only. The §31.2 contract suite against a real Google Drive account.
+#
+# Never runs on push or pull_request: it needs a live credential and the
+# network, and it creates and deletes inside DRIVE_TEST_ROOT. The same suite
+# runs against the fake on every push, and the adapter replays recorded Drive
+# responses on every push; what this adds is whether Drive behaves today the
+# way those recordings say it did.
+#
+# While the OAuth app is in Testing status the refresh token expires seven days
+# after it was minted, and this job fails with invalid_grant. That is the
+# expected §23 AUTH_REQUIRED, not a defect: mint a new one with
+# :tools:drive-auth:driveAuth.
+name: Drive live contract tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  contract:
+    name: §31.2 against a real Drive account
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Fails in seconds with a reason. Without the token every test would skip
+      # and the run would read as a pass.
+      - name: Require the credentials and a safe root
+        env:
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          DRIVE_TOOL_CLIENT_SECRET: ${{ secrets.DRIVE_TOOL_CLIENT_SECRET }}
+          DRIVE_TEST_ROOT: ${{ secrets.DRIVE_TEST_ROOT }}
+        run: |
+          missing=""
+          [ -z "$DRIVE_REFRESH_TOKEN" ] && missing="$missing DRIVE_REFRESH_TOKEN"
+          [ -z "$DRIVE_TOOL_CLIENT_SECRET" ] && missing="$missing DRIVE_TOOL_CLIENT_SECRET"
+          [ -z "$DRIVE_TEST_ROOT" ] && missing="$missing DRIVE_TEST_ROOT"
+          if [ -n "$missing" ]; then
+            echo "::error::Repository secrets not set:$missing."
+            exit 1
+          fi
+          if [ "$(echo "$DRIVE_TEST_ROOT" | tr 'A-Z' 'a-z')" = "root" ]; then
+            echo "::error::DRIVE_TEST_ROOT is 'root', the whole of My Drive. Point it at the test folder."
+            exit 1
+          fi
+
+      - name: Run the contract suite
+        env:
+          DRIVE_REFRESH_TOKEN: ${{ secrets.DRIVE_REFRESH_TOKEN }}
+          DRIVE_TOOL_CLIENT_SECRET: ${{ secrets.DRIVE_TOOL_CLIENT_SECRET }}
+          DRIVE_TEST_ROOT: ${{ secrets.DRIVE_TEST_ROOT }}
+        run: ./gradlew :providers:google-drive:test --console=plain --stacktrace
+
+      # A run that skipped everything is not a passing run.
+      - name: Fail if the live tests only skipped
+        if: always()
+        run: |
+          report=providers/google-drive/build/test-results/test/TEST-dev.thiagosindra.cloudlug.provider.googledrive.DriveContractLiveTest.xml
+          if [ ! -f "$report" ]; then
+            echo "::error::No contract-test report was produced."
+            exit 1
+          fi
+          skipped=$(grep -o 'skipped="[0-9]*"' "$report" | head -1 | tr -dc '0-9')
+          total=$(grep -o 'tests="[0-9]*"' "$report" | head -1 | tr -dc '0-9')
+          echo "$skipped of $total live contract tests were skipped."
+          if [ "$skipped" = "$total" ]; then
+            echo "::error::Every live test skipped, so nothing ran against Drive."
+            exit 1
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drive-live-contract
+          path: providers/google-drive/build/reports/tests/**
