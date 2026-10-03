@@ -24,34 +24,70 @@ recovery is `SchedulingPolicy` re-read over rows (§2.4) — and the in-app
 execution and Google Drive moves to v0.6. Spec §33's table is amended in
 [`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) §9.
 
-## v0.6 in progress — Step 1: the Drive tools
+## v0.6 in progress — Google Drive as a destination
 
-v0.6 is Google Drive as a destination. Following `docs/testing.md`'s "wire
-first, code second", the first PR adds only the tools that put real requests on
-the wire, and `GoogleOAuth`, which they share with the app to come:
+**Step 1 (merged): the tools.** `tools/drive-auth`, `drive-hash-check` and
+`drive-capture`, with `GoogleOAuth` shared with the app. The first capture run
+found a defect in the capture tool itself: it published a `session_crd` URL
+parameter, because redaction knew only `upload_id` by name. Redaction of URL
+parameters is now deny-by-default (a PR of its own). The leaked value is only
+on an unmerged branch, and that capture is to be redone.
 
-- `tools/drive-auth` — PKCE and a loopback redirect against the Desktop tooling
-  client; prints the refresh token alone on stdout, and finds or creates the
-  `cloudlug-contract-tests` test root among files this project can see.
-- `tools/drive-hash-check` — §36: 1 byte, 256 KiB, 8 MiB, ~10 MiB and a local
-  file, uploaded the way the adapter will (resumable, 8 MiB chunks), compared
-  against `:core:hashing` in both the finishing response and `files.get`.
-- `tools/drive-capture` — every route the adapter will use and every error it
-  can provoke, pseudonymized, refusing to write if a real value survives.
+**Step 2: the adapter.** `GoogleDriveCloudProvider` over `:core:network`:
+- **Discovery:** `rootOf`, `listChildren` with paging, `lookupDestination`
+  (every same-name sibling, so §19.3 can call it a conflict), and quota from
+  `about.get`.
+- **Folders:** an idempotent `prepareDestination`, which refuses when two
+  folders share the name (spec-proposals/v1.6 §5).
+- **Uploads:** resumable, in 8 MiB chunks. The session URI is persisted in
+  `uploadSessionMetadata`, with an expiry a day inside Google's week. The
+  acknowledged offset comes from the `308` `Range` header.
+- **Verification:** `finishUpload` returns the file the final chunk produced,
+  and after process death it recovers that file from the completed session.
+  §21 now compares Drive's SHA-256 as well as its MD5 (v1.6 §6).
+- **Errors:** §23's 403 reasons and `invalid_grant` are mapped.
+- **Source calls:** `canBeSource` follows the granted scopes. An account
+  holding only `drive.file` refuses enumeration and download by name.
 
-**Run against real Google so far:** only that Google accepts the Desktop
-client's authorization request. It answers the URL `drive-auth` builds with its
-sign-in page rather than an error. That covers the client id, the loopback
-redirect and the PKCE parameters. Nothing has touched a Drive account yet.
-The hash check waits on a token minted by the maintainer.
+Credentials are keyed by account for both providers in one provider-neutral
+`RefreshTokenStore`. `AccountRepository` is keyed by account, not provider.
+`GoogleDriveConnector` signs in through AppAuth with a Custom Tab, the
+reverse-client-id scheme (enabled on the client; v1.6 §4 records the risk
+that Google withdraws it), `access_type=offline` and `prompt=consent`, and it
+revokes through `oauth2/revoke` before forgetting. The accounts screen offers
+Google Drive.
 
-**Two `drive.file` facts changed the plan before any code depended on it**
-([`spec-proposals/v1.6.md`](spec-proposals/v1.6.md) §1–2). A folder or file
-made outside CloudLug is invisible, so the test root is created by the tools,
-§36's "existing file" case is a local file, and Drive's destination picker
-offers only My Drive and CloudLug's own folders. **One question is open for
-Step 2** (v1.6 §4): Google now documents custom URI schemes as unsupported for
-Android clients, which is the redirect §8.4 and the plan assume.
+**`GOOGLE_DRIVE` is the real adapter now.** The registry is keyed by provider
+type, so the demo destination moved to its own debug-only
+`FAKE_DESTINATION`. Without that move, a real Drive account's transfer would
+have gone into the in-memory fake and reported success.
+
+### Real Drive, recordings only, or nothing yet
+
+**Run against real Google Drive:**
+- the Desktop client's authorize URL;
+- the capture run: every route the adapter uses, plus 404, 400, 401,
+  `invalid_grant` and the cancelled-session `499`;
+- the recorded MD5 and SHA-256 of two uploads. Both match the bytes sent,
+  which are deterministic, so this is checked offline on every PR by the
+  handoff test.
+
+**Run only against those recordings:**
+- every adapter route (`DriveCapturedRoutesTest`);
+- the real engine moving a file through the real adapter to `COMPLETED` by
+  destination hash (`DriveDestinationHandoffTest`).
+
+**Not yet run:**
+- **The §36 hash-check output** for 1 B, 256 KiB, 8 MiB, ~10 MiB and a local
+  file. Only the two captured uploads above have been compared.
+- **The live contract suite.** Its 23 tests skip without
+  `DRIVE_REFRESH_TOKEN`.
+- **Sign-in on a phone**: the Custom Tab, the custom-scheme redirect, and
+  revocation.
+- **Throttling and a full account.** Their 403 bodies are the captured
+  envelope with the reason swapped; none has been seen for real.
+- **Whether the app's Android client can see folders the tools' Desktop
+  client created.** Both are in one project; Google does not document it.
 
 ## What writing §31.4's first scenario found
 
@@ -157,7 +193,7 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 | `:core:transfer` | Manifest builder (§10, §11, §20), collision algorithm (§19.3), retry policy (§23), verification (§21), network policy (§16), pipeline (§14), engine (§13.1, §22), `TransferController` (§35), **`SchedulingPolicy`** — which transfers have work left and what network each needs (§16, §17) | 95 |
 | `:providers:fake` | `FakeCloudProvider` with the §31.3 failure injections, including per-chunk read and upload delays; the §31.2 contract suite in test fixtures | 59 |
 | `:core:network` | The shared OkHttp stack and §26's redaction interceptor: a deny-by-default header allow-list, and no branch that can print a body | 9 |
-| `:providers:google-drive` | v0.6 Step 1: `GoogleOAuth` only — the two clients, `drive.file`, scope-driven roles (§7, §8.2). The adapter follows Step 1 | 5 |
+| `:providers:google-drive` | The Drive adapter (§5 destination surface, §23 mapping, §22.5 resumable sessions), `GoogleOAuth`, §8.3's token source; replay of every captured route and the engine handoff | 55 + 23 live |
 | `:providers:dropbox` | The adapter (§5 surface, §23 mapping, §22.5 offset recovery), PKCE and the OAuth forms (§8.1), the token endpoint, and §8.3's token source | 95 |
 | `:core:security` | `SecretStore` and the Keystore-backed AES-GCM implementation (§8.3) | 11 instrumented |
 | `:core:scheduling` | §17: the two platform schedulers, `TransferRunner`, §24.4's notification with its Pause and Cancel actions, the boot receiver | — |

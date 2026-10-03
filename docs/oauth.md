@@ -136,18 +136,25 @@ recorded as unverified in `docs/status.md` until a device shows it.
 **restricted**, with a security assessment required for restricted-scope data.
 That matches §8.2.
 
-### Open for Step 2: the Android redirect
+### The Android redirect, and the risk it carries
 
-Google's native-app guide now says **"Custom URI schemes are no longer
-supported on Android and Chrome apps"**, and that loopback redirects on mobile
-are deprecated. §8.4 and the v0.6 plan assume AppAuth with a Custom Tab and the
-reverse-client-id scheme (`com.googleusercontent.apps.<id>:/oauth2redirect`).
-Whether this Android client accepts that redirect — some consoles expose it as
-an "Enable custom URI scheme" advanced setting on the Android client — has to
-be settled before the connector is written, because the documented
-alternative (Google Identity Services' authorization client) does not go
-through a browser at all and would change §8.4. Recorded in
-[`spec-proposals/v1.6.md`](spec-proposals/v1.6.md).
+The app's Google sign-in returns through Google's reverse-client-id custom
+scheme, `com.googleusercontent.apps.<client id>:/oauth2redirect`
+(`GoogleOAuth.ANDROID_REDIRECT_URI`), claimed by the app's manifest and
+validated against the pending PKCE state (§8.4).
+
+Google's native-app guide says **"Custom URI schemes are no longer supported
+on Android and Chrome apps"**. The scheme works for CloudLug only because
+**"Enable custom URI scheme" is switched on in the Android client's Advanced
+settings**, which the maintainer confirmed on 2026-10-03. If you register
+your own Android client, switch it on too, or sign-in will fail at the
+redirect.
+
+That setting can be withdrawn. If Google removes it, the fallback is Google's
+own authorization client, which goes through Play services rather than a
+browser and leaves no refresh token in CloudLug's hands. That would change
+§8.3 and §8.4. The options are written up in
+[`spec-proposals/v1.6.md`](spec-proposals/v1.6.md) §4.
 
 ## Dropbox
 
