@@ -4,6 +4,7 @@ import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.provider.Chunk
+import dev.thiagosindra.cloudlug.provider.CloudException
 import dev.thiagosindra.cloudlug.provider.CloudObject
 import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.CloudProvider
@@ -14,6 +15,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -29,7 +31,8 @@ import kotlin.test.assertTrue
  *
  * Tests here only assume what [CloudProvider.capabilities] declares: a provider
  * without range download or without a server hash skips those checks rather
- * than failing them.
+ * than failing them, and a destination-only provider (`canBeSource = false`)
+ * skips enumeration and download — and is held instead to refusing them.
  */
 abstract class ProviderContractTest {
 
@@ -111,6 +114,7 @@ abstract class ProviderContractTest {
     @Test
     fun `enumerate emits every selection root`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val root = rootFolder(provider)
         val photos = seedFolder(provider, root, "photos")
         seedFile(provider, photos, "1.png", byteArrayOf(1))
@@ -132,6 +136,7 @@ abstract class ProviderContractTest {
     @Test
     fun `enumerate emits parents before children`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val root = rootFolder(provider)
         val photos = seedFolder(provider, root, "photos")
         val year = seedFolder(provider, photos, "2026")
@@ -165,6 +170,7 @@ abstract class ProviderContractTest {
     @Test
     fun `enumerate accepts a file as a selection root`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val file = seedFile(provider, rootFolder(provider), "alone.txt", byteArrayOf(1))
 
         // §9 puts a checkbox on every row, files included, so a selection root
@@ -181,6 +187,7 @@ abstract class ProviderContractTest {
     @Test
     fun `enumerate includes empty folders`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val root = rootFolder(provider)
         val parent = seedFolder(provider, root, "tree")
         seedFolder(provider, parent, "empty")
@@ -192,6 +199,7 @@ abstract class ProviderContractTest {
     @Test
     fun `enumeration resumes from an object id without repeating earlier objects`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val root = rootFolder(provider)
         val parent = seedFolder(provider, root, "tree")
         repeat(5) { seedFile(provider, parent, "file-$it.bin", byteArrayOf(it.toByte())) }
@@ -219,6 +227,7 @@ abstract class ProviderContractTest {
     @Test
     fun `an enumeration whose resume point has vanished starts over rather than yielding nothing`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val root = rootFolder(provider)
         val parent = seedFolder(provider, root, "tree")
         repeat(3) { seedFile(provider, parent, "file-$it.bin", byteArrayOf(it.toByte())) }
@@ -243,6 +252,23 @@ abstract class ProviderContractTest {
         // Re-walking is safe: §11 says the manifest deduplicates by source
         // object id, so a restart is idempotent and only slower.
         assertEquals(4, resumed.size, "expected the folder and its three files, got ${resumed.map { it.name }}")
+    }
+
+    /**
+     * The companion to every `canBeSource` gate above: a destination-only
+     * provider must *refuse* source calls, not answer them emptily. An empty
+     * walk is indistinguishable from an empty selection, and the gates above
+     * would otherwise let such a provider skip this whole section unnoticed
+     * (`docs/testing.md` rule 2).
+     */
+    @Test
+    fun `a provider that cannot be a source refuses source calls rather than answering empty`() = runTest {
+        val provider = newProvider()
+        if (provider.capabilities.canBeSource) return@runTest
+        val id = seedFile(provider, rootFolder(provider), "data.bin", ByteArray(16))
+
+        assertFailsWith<CloudException> { provider.openDownload(account(provider), id).close() }
+        assertFailsWith<CloudException> { provider.enumerate(account(provider), selectionOf(provider, rootFolder(provider))).toList() }
     }
 
     @Test
@@ -281,6 +307,7 @@ abstract class ProviderContractTest {
     @Test
     fun `download returns the bytes that were stored`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         val content = ByteArray(4_096) { (it % 251).toByte() }
         val id = seedFile(provider, rootFolder(provider), "data.bin", content)
 
@@ -292,6 +319,7 @@ abstract class ProviderContractTest {
     @Test
     fun `range download returns exactly the requested window`() = runTest {
         val provider = newProvider()
+        if (!provider.capabilities.canBeSource) return@runTest
         if (!provider.capabilities.supportsRangeDownload) return@runTest
         val content = ByteArray(4_096) { (it % 251).toByte() }
         val id = seedFile(provider, rootFolder(provider), "data.bin", content)

@@ -48,8 +48,30 @@ object DestinationVerifier {
      * @param expectedSize bytes CloudLug sent, or null when unknown
      * @param resolveMetadata re-reads the destination object; called only when
      *   the finish response carried no hash (step 2)
+     * @param expectedSha256 the provider-independent SHA-256 computed in the same
+     *   pass (spec §19.4). When the destination also reports a SHA-256 — Drive
+     *   does, beside its native MD5 — §19.4 says compare whichever is returned,
+     *   so a disagreement there is a mismatch even when the native hash agrees.
      */
     suspend fun verify(
+        uploaded: CloudObject,
+        expectedNativeHash: ProviderHash?,
+        expectedSize: Long?,
+        capabilities: ProviderCapabilities,
+        resolveMetadata: suspend () -> CloudObject,
+        expectedSha256: ProviderHash? = null,
+    ): VerificationResult {
+        val result = verifyNative(uploaded, expectedNativeHash, expectedSize, capabilities, resolveMetadata)
+        if (result !is VerificationResult.Verified || expectedSha256 == null) return result
+        val reported = uploaded.additionalHashes.firstOrNull { it.comparableTo(expectedSha256) } ?: return result
+        return if (reported.matches(expectedSha256)) {
+            result
+        } else {
+            VerificationResult.Mismatch("destination ${reported.algorithm} hash differs from the uploaded bytes")
+        }
+    }
+
+    private suspend fun verifyNative(
         uploaded: CloudObject,
         expectedNativeHash: ProviderHash?,
         expectedSize: Long?,

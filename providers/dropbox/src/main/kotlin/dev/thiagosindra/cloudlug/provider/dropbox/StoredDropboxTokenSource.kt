@@ -3,27 +3,14 @@ package dev.thiagosindra.cloudlug.provider.dropbox
 import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
 import dev.thiagosindra.cloudlug.provider.CloudException
+import dev.thiagosindra.cloudlug.provider.RefreshTokenStore
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
 
-/**
- * Where the long-lived refresh token lives, as this module needs to see it.
- *
- * Deliberately three methods and no Android types: §8.3's real store is
- * Keystore-backed and only exists on a device, and putting that type in this
- * signature would make the refresh logic — the part with the four-hour failure
- * mode — testable only on an emulator.
- *
- * Implementations must not return a token they cannot decrypt; §8.3 treats an
- * unreadable credential as absent, so [read] answering null is the recovery.
- */
-interface DropboxRefreshTokenStore {
-    fun read(account: AccountId): String?
-    fun write(account: AccountId, token: String)
-    fun clear(account: AccountId)
-}
+/** Provider-neutral since v0.6; see [RefreshTokenStore]. */
+typealias DropboxRefreshTokenStore = RefreshTokenStore
 
 /**
  * §8.3's credential handling: a stored refresh token, and an access token that

@@ -291,6 +291,7 @@ class FileTransferWorker(
                     destination.resolveMetadata(transfer.destinationAccountId, uploaded.id)
                 }
             },
+            expectedSha256 = moved.hash.sha256,
         )
         return when (result) {
             is VerificationResult.Verified ->
