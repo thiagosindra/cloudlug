@@ -136,6 +136,7 @@ class FakeCloudProvider(
             // Recorded inside the flow: enumerate no longer suspends, so nothing
             // happens until collection starts (spec §5).
             record(FailureInjection.Operation.ENUMERATE)
+            requireSource()
             var emitted = 0
             // A resume point that is no longer in the account can never be
             // reached, and skipping until it arrives would emit nothing at all
@@ -165,6 +166,17 @@ class FakeCloudProvider(
         }
     }
 
+    /**
+     * A destination-only fake refuses source calls, as a real one must: the
+     * contract suite holds a provider to that, and a fake that answered would
+     * let a destination-only run of the suite read back what it should not.
+     */
+    private fun requireSource() {
+        if (!capabilities.canBeSource) {
+            throw CloudException(CloudErrorKind.PERMANENT, "this fake cannot be a source", code = "not_a_source")
+        }
+    }
+
     /** One level, in insertion order (spec §9). */
     override fun rootOf(account: AccountId): CloudObjectId =
         CloudObjectId(type, FakeCloudStorage.ROOT_ID)
@@ -191,6 +203,7 @@ class FakeCloudProvider(
         range: LongRange?,
     ): CloudDownload {
         record(FailureInjection.Operation.OPEN_DOWNLOAD)
+        requireSource()
         val obj = storage.find(objectId.opaqueId)
             ?: throw CloudException(CloudErrorKind.NOT_FOUND, "no object ${objectId.opaqueId}", code = "404")
         if (obj.type != CloudObjectType.FILE) {

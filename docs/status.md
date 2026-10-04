@@ -99,8 +99,14 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   destination hash (`DriveDestinationHandoffTest`).
 
 **Not yet run:**
-- **The live contract suite.** Its 23 tests skip without
-  `DRIVE_REFRESH_TOKEN`.
+- **The live contract suite, cleanly.** Its first run (2026-10-04) failed
+  one test, `upload stores the bytes and reports progress`. The upload
+  succeeded; the test then tried to read the file back, which `drive.file`
+  correctly refuses (`source_scope_not_granted`). The shared contract suite
+  had no destination-only run offline, so nothing had caught the missing
+  `canBeSource` gate. It now proves the bytes by the reported hash instead,
+  and `DestinationOnlyFakeProviderContractTest` runs the whole suite
+  destination-only on every PR. It needs one more live run to be green.
 - **Sign-in on a phone**: the Custom Tab, the custom-scheme redirect, and
   revocation.
 - **Throttling and a full account.** Their 403 bodies are the captured
@@ -688,9 +694,11 @@ The code is complete. What is left needs your account, your phone, or both.
 1. ~~**The §36 hash-check output.**~~ Done: all five cases matched on MD5
    and SHA-256, in both places Drive reports them. See "Run against real
    Google Drive" above.
-2. **The live contract suite**, from **Drive live contract tests** in the
-   Actions tab. Nothing has run it against real Drive. While the OAuth app is
-   in Testing status, the refresh token behind it expires every seven days.
+2. **The live contract suite, once more**, from **Drive live contract tests**
+   in the Actions tab. The first run found a test bug, not an adapter bug
+   (see "Not yet run" above); this run should be green. While the OAuth app
+   is in Testing status, the refresh token behind it expires every seven
+   days.
 3. **The first real Dropbox → Google Drive transfer, on your phone.** Watch
    for these:
    - The Google sign-in, which nothing has run end to end: Custom Tab,
