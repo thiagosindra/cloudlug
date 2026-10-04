@@ -1,0 +1,11 @@
+{
+  "error": {
+    "code": 499,
+    "message": "clientClosedRequest",
+    "errors": [{
+      "message": "clientClosedRequest",
+      "domain": "global",
+      "reason": "clientClosedRequest"
+    }]
+  }
+}
