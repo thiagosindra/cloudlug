@@ -47,6 +47,16 @@ class NetworkPolicyHoldTest {
     @After
     fun restoreWifi() = app.setWifi(true)
 
+    /**
+     * And ends clean, for the suites that run after this one on the same
+     * device. `:app`'s journey cannot clear data from inside the app's own
+     * process, and a demo transfer left behind made its files read "already
+     * transferred". Its check for "verified by destination hash" kept passing
+     * only because folder rows claimed it too, until v0.6.1 labelled them.
+     */
+    @After
+    fun leaveClean() = app.clearData()
+
     @Test
     fun an_unmetered_only_transfer_holds_when_wifi_goes_away_saying_why_and_resumes_when_it_returns() {
         app.launch(pacePerChunkMillis = CloudLug.PACE_MS)
