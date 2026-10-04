@@ -18,6 +18,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * The behavioural contract every provider adapter must satisfy (spec §31.2).
@@ -390,8 +391,21 @@ abstract class ProviderContractTest {
         val uploaded = upload(provider, root, "big.bin", content)
 
         assertEquals(content.size.toLong(), uploaded.size)
-        val readBack = provider.openDownload(account(provider), uploaded.id).use { readAll(it) }
-        assertContentEquals(content, readBack)
+        val algorithm = provider.capabilities.nativeHashAlgorithm
+        when {
+            provider.capabilities.canBeSource -> {
+                val readBack = provider.openDownload(account(provider), uploaded.id).use { readAll(it) }
+                assertContentEquals(content, readBack)
+            }
+            // A destination-only provider refuses to read back (see the
+            // refusal test above). What it stored is then proved the way §21
+            // proves it in a real transfer: by the hash it reports.
+            provider.capabilities.supportsServerHash && algorithm != null -> {
+                val reported = assertNotNull(uploaded.providerHash, "a server-hash provider must report one")
+                assertEquals(FakeCloudProvider.hash(content, algorithm).value, reported.value)
+            }
+            else -> fail("a provider that can neither be read back nor report a hash cannot show it stored the bytes")
+        }
     }
 
     @Test

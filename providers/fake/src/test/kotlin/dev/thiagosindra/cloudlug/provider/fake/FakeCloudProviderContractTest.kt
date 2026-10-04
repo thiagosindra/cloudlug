@@ -69,3 +69,34 @@ class AwkwardFakeProviderContractTest : ProviderContractTest() {
         content: ByteArray,
     ): CloudObjectId = (provider as FakeCloudProvider).storage.file(name, content, parent)
 }
+
+/**
+ * The same contract against a destination-only provider, which is what Google
+ * Drive under `drive.file` is. Without this the suite's `canBeSource` branches
+ * ran only live: an unguarded read-back in the upload test passed every PR and
+ * failed the first live Drive run.
+ */
+class DestinationOnlyFakeProviderContractTest : ProviderContractTest() {
+
+    override fun newProvider(): CloudProvider = FakeCloudProvider(
+        capabilities = FakeCloudProvider.defaultCapabilities(canBeSource = false),
+    )
+
+    override fun account(provider: CloudProvider): AccountId = AccountId("fake-account")
+
+    override suspend fun rootFolder(provider: CloudProvider): CloudObjectId =
+        (provider as FakeCloudProvider).storage.folder("root")
+
+    override suspend fun seedFolder(
+        provider: CloudProvider,
+        parent: CloudObjectId,
+        name: String,
+    ): CloudObjectId = (provider as FakeCloudProvider).storage.folder(name, parent)
+
+    override suspend fun seedFile(
+        provider: CloudProvider,
+        parent: CloudObjectId,
+        name: String,
+        content: ByteArray,
+    ): CloudObjectId = (provider as FakeCloudProvider).storage.file(name, content, parent)
+}
