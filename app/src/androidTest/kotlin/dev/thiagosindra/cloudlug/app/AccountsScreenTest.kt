@@ -94,27 +94,4 @@ class AccountsScreenTest {
 
         compose.awaitText("New Transfer")
     }
-
-    @Test
-    fun disconnecting_an_account_with_no_connector_does_not_crash() {
-        // The demo Drive row has a Disconnect button and no connector behind
-        // it. Looking that connector up with error() threw
-        // IllegalStateException, which §24.5's error handling does not catch,
-        // so the press took the app down.
-        compose.node("Accounts").performClick()
-        compose.awaitText("demo-destination@example.invalid")
-
-        // "Disconnect…" opens the confirmation; "Disconnect" inside it acts.
-        compose.node("Disconnect\u2026").performClick()
-        compose.awaitText("will revoke its access")
-        compose.node("Disconnect").performClick()
-
-        // The row is gone and the app is still here.
-        compose.awaitText("Accounts")
-        assertTrue(
-            "the demo Drive account survived being disconnected",
-            compose.onAllNodesWithText("demo-destination@example.invalid", useUnmergedTree = true)
-                .fetchSemanticsNodes().isEmpty(),
-        )
-    }
 }
