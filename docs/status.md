@@ -86,6 +86,15 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   (§21 step 1) and from a later `files.get` (§21 step 2). So Drive reports
   SHA-256 in both places, and v1.6 §6's second-hash comparison has a real
   value to compare against;
+- **the live contract suite, all 23 tests** (2026-10-04), from **Drive live
+  contract tests**: authentication, quota, folder creation and lookup
+  including duplicates, chunked upload and resume, the §22.5 offset query,
+  metadata, the reported hash, abort, and the refusal of source calls
+  under `drive.file`. The first run failed one test that read an upload back,
+  which `drive.file` correctly refuses; the adapter was right and the shared
+  suite lacked a `canBeSource` gate. The suite now proves a destination-only
+  upload by its reported hash, and `DestinationOnlyFakeProviderContractTest`
+  runs it that way offline on every PR;
 - the Desktop client's authorize URL;
 - the capture run: every route the adapter uses, plus 404, 400, 401,
   `invalid_grant` and the cancelled-session `499`;
@@ -99,14 +108,6 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   destination hash (`DriveDestinationHandoffTest`).
 
 **Not yet run:**
-- **The live contract suite, cleanly.** Its first run (2026-10-04) failed
-  one test, `upload stores the bytes and reports progress`. The upload
-  succeeded; the test then tried to read the file back, which `drive.file`
-  correctly refuses (`source_scope_not_granted`). The shared contract suite
-  had no destination-only run offline, so nothing had caught the missing
-  `canBeSource` gate. It now proves the bytes by the reported hash instead,
-  and `DestinationOnlyFakeProviderContractTest` runs the whole suite
-  destination-only on every PR. It needs one more live run to be green.
 - **Sign-in on a phone**: the Custom Tab, the custom-scheme redirect, and
   revocation.
 - **Throttling and a full account.** Their 403 bodies are the captured
@@ -694,11 +695,10 @@ The code is complete. What is left needs your account, your phone, or both.
 1. ~~**The §36 hash-check output.**~~ Done: all five cases matched on MD5
    and SHA-256, in both places Drive reports them. See "Run against real
    Google Drive" above.
-2. **The live contract suite, once more**, from **Drive live contract tests**
-   in the Actions tab. The first run found a test bug, not an adapter bug
-   (see "Not yet run" above); this run should be green. While the OAuth app
-   is in Testing status, the refresh token behind it expires every seven
-   days.
+2. ~~**The live contract suite.**~~ Done: all 23 tests green against real
+   Drive on its second run. See "Run against real Google Drive" above. While
+   the OAuth app is in Testing status, the refresh token behind it expires
+   every seven days, so a later run may first need a fresh `drive-auth`.
 3. **The first real Dropbox → Google Drive transfer, on your phone.** Watch
    for these:
    - The Google sign-in, which nothing has run end to end: Custom Tab,
