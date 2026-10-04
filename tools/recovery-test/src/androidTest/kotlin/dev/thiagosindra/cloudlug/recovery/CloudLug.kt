@@ -11,6 +11,7 @@ import java.io.ByteArrayOutputStream
 import java.util.regex.Pattern
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * CloudLug, driven from outside its own process.
@@ -54,6 +55,21 @@ class CloudLug {
             device.wait(Until.hasObject(By.pkg(PACKAGE).depth(0)), LAUNCH_TIMEOUT),
             "CloudLug did not come to the foreground; on screen: ${device.currentPackageName}",
         )
+    }
+
+    /**
+     * Wipes CloudLug's data, so a test starts from an empty database.
+     *
+     * The demo source's object ids are the same in every process, and §19.2's
+     * idempotency record lives in Room, which survives a force-stop. A demo
+     * transfer of `photos` after an earlier one in the same emulator session is
+     * therefore all ALREADY_TRANSFERRED, never shows CURRENT FILE, and the
+     * mid-file scenarios cannot happen. Whether an earlier one had run used to
+     * depend on test order and on what else had touched the app.
+     */
+    fun clearData() {
+        val result = device.executeShellCommand("pm clear $PACKAGE").trim()
+        assertEquals("Success", result, "could not clear $PACKAGE's data")
     }
 
     fun forceStop() {
@@ -127,17 +143,19 @@ class CloudLug {
         // Either screen will do. §24.1's row carries the same summary line as
         // §24.3's, and which one is showing depends on whether the task
         // survived — a platform difference this has no business asserting on.
-        assertTrue(
-            device.wait(Until.hasObject(By.text(Pattern.compile("Completed\\b.*"))), timeoutMillis),
-            "the transfer never completed.\n${visibleText()}",
-        )
+        // The messages are built only on failure. Built eagerly, as they were,
+        // visibleText() walked every node on a screen that was still
+        // recomposing, and a node that vanished mid-walk threw
+        // StaleObjectException out of an assertion that was passing.
+        if (!device.wait(Until.hasObject(By.text(Pattern.compile("Completed\\b.*"))), timeoutMillis)) {
+            fail("the transfer never completed.\n${visibleText()}")
+        }
         // "Completed with issues" also begins with "Completed", and it is
         // exactly what a half-recovered transfer would say: §32.1 requires the
         // files that were in flight to be finished, not abandoned as failed.
-        assertTrue(
-            device.findObject(By.text(Pattern.compile("(?i).*\\b(failed|issues|conflict)\\b.*"))) == null,
-            "the transfer finished, but not cleanly.\n${visibleText()}",
-        )
+        if (device.findObject(By.text(Pattern.compile("(?i).*\\b(failed|issues|conflict)\\b.*"))) != null) {
+            fail("the transfer finished, but not cleanly.\n${visibleText()}")
+        }
     }
 
     /** True once the emulator's Wi-Fi state has settled the way it was asked to. */
@@ -184,8 +202,11 @@ class CloudLug {
      * printed with it.
      */
     fun visibleText(): String {
+        // Per node, because the screen may still be changing while this runs:
+        // a node gone stale is skipped, not allowed to replace the failure
+        // being reported with one of its own.
         val texts = device.findObjects(By.pkg(PACKAGE))
-            .mapNotNull { it.text?.takeIf(String::isNotBlank) ?: it.contentDescription }
+            .mapNotNull { node -> runCatching { node.text?.takeIf(String::isNotBlank) ?: node.contentDescription }.getOrNull() }
             .distinct()
         return "On screen (${device.currentPackageName}): " +
             (if (texts.isEmpty()) "nothing from $PACKAGE" else texts.joinToString(" | ")) +

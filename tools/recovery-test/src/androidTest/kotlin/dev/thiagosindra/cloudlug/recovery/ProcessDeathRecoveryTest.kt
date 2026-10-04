@@ -1,6 +1,7 @@
 package dev.thiagosindra.cloudlug.recovery
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -25,6 +26,10 @@ import org.junit.runner.RunWith
 class ProcessDeathRecoveryTest {
 
     private val app = CloudLug()
+
+    /** See [CloudLug.clearData]: a mid-file scenario needs a transfer with work in it. */
+    @Before
+    fun startClean() = app.clearData()
 
     /**
      * The mechanism on its own, kept as a separate test because it is the

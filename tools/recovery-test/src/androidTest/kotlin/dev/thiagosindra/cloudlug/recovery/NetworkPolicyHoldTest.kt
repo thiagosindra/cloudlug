@@ -7,7 +7,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import kotlin.test.assertTrue
+import kotlin.test.fail
 
 /**
  * Spec §16 and §24.4 on a device: take the allowed network away mid-transfer,
@@ -38,7 +38,10 @@ class NetworkPolicyHoldTest {
     private val app = CloudLug()
 
     @Before
-    fun wifiUp() = app.setWifi(true)
+    fun startClean() {
+        app.clearData()
+        app.setWifi(true)
+    }
 
     /** Whatever the test did, the next one starts on Wi-Fi. */
     @After
@@ -61,10 +64,9 @@ class NetworkPolicyHoldTest {
         // with the screen off will see it. This is the assertion that fails if
         // the notification is simply taken down when the job ends.
         app.device.openNotification()
-        assertTrue(
-            app.device.wait(Until.hasObject(By.text(WAITING)), SHADE_TIMEOUT),
-            "the shade never said why the transfer stopped.\n${app.visibleText()}",
-        )
+        if (!app.device.wait(Until.hasObject(By.text(WAITING)), SHADE_TIMEOUT)) {
+            fail("the shade never said why the transfer stopped.\n${app.visibleText()}")
+        }
         app.device.pressBack()
 
         // §16: automatic. Nothing is pressed here; the constraint clears and
