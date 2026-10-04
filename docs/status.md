@@ -86,6 +86,17 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   (§21 step 1) and from a later `files.get` (§21 step 2). So Drive reports
   SHA-256 in both places, and v1.6 §6's second-hash comparison has a real
   value to compare against;
+- **the first Dropbox → Google Drive transfer, on a Samsung phone**
+  (reported 2026-10-04). Google sign-in through the Custom Tab and the
+  custom-scheme redirect worked, then a one-file transfer of about 11 MB
+  ended "verified by destination hash" and the file was in Drive. It ran as a
+  user-initiated job and found one defect: the notification stayed in the
+  shade afterwards, showing the run as still in progress, with Pause and
+  Cancel and no way to swipe it away. The job owns its notification while it
+  runs and ignores the app's own cancel, and its end policy (`DETACH`) then
+  left the last progress update behind. It now ends with `REMOVE`, and the
+  waiting-state notification that has to outlive the job is posted under its
+  own id;
 - **the live contract suite, all 23 tests** (2026-10-04), from **Drive live
   contract tests**: authentication, quota, folder creation and lookup
   including duplicates, chunked upload and resume, the §22.5 offset query,
@@ -108,8 +119,8 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   destination hash (`DriveDestinationHandoffTest`).
 
 **Not yet run:**
-- **Sign-in on a phone**: the Custom Tab, the custom-scheme redirect, and
-  revocation.
+- **Revocation on a phone**: disconnecting Google Drive, and the grant
+  disappearing from the Google account's third-party access list.
 - **Throttling and a full account.** Their 403 bodies are the captured
   envelope with the reason swapped; none has been seen for real.
 - **Whether the app's Android client can see folders the tools' Desktop
@@ -699,13 +710,15 @@ The code is complete. What is left needs your account, your phone, or both.
    Drive on its second run. See "Run against real Google Drive" above. While
    the OAuth app is in Testing status, the refresh token behind it expires
    every seven days, so a later run may first need a fresh `drive-auth`.
-3. **The first real Dropbox → Google Drive transfer, on your phone.** Watch
-   for these:
-   - The Google sign-in, which nothing has run end to end: Custom Tab,
-     custom-scheme redirect, code exchange, `about.get`, then the account row.
-   - The picker note, and the review's "created at the top of My Drive" line.
-   - Every file ending "verified by destination hash".
-   - The folder appearing in My Drive under the name the review showed.
+3. **The first real Dropbox → Google Drive transfer, on your phone.**
+   Sign-in and a verified transfer are done (see "Run against real Google
+   Drive" above), and the leftover-notification defect it found is fixed.
+   Still to check:
+   - That the notification is gone when the next transfer finishes, on the
+     same phone. CI's emulator runs API 30, which takes the WorkManager path,
+     so nothing automated exercises the user-initiated job on API 34+.
+   - The picker note, the review's "created at the top of My Drive" line, and
+     the folder appearing in My Drive under the name the review showed.
    - Disconnecting Google Drive afterwards, which revokes the grant. The app
      should then disappear from your Google account's third-party access
      list.

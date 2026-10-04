@@ -37,8 +37,22 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    /** Stable per transfer, so an update replaces rather than stacks. */
+    /**
+     * The running job's notification. Stable per transfer, so an update
+     * replaces rather than stacks. The platform owns it while the job runs and
+     * removes it when the job ends; callers must not assume the app can.
+     */
     fun notificationId(id: dev.thiagosindra.cloudlug.model.TransferId): Int = id.value.hashCode()
+
+    /**
+     * The waiting-state notification that outlives the job. A different id
+     * from [notificationId] on purpose: a notification the job owns cannot be
+     * cancelled by the app while the job runs, and is removed with the job
+     * when it ends, so sharing the id would make this one either stick or
+     * vanish with it.
+     */
+    private fun parkedNotificationId(id: dev.thiagosindra.cloudlug.model.TransferId): Int =
+        (id.value + PARKED_SUFFIX).hashCode()
 
     /**
      * @param accountNames disambiguates two accounts at one provider, the same
@@ -98,8 +112,8 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
      * is re-posted as an ordinary notification, which outlives the job.
      *
      * PAUSED is not parked. The user did that deliberately (§22.1) and knows
-     * why; anything terminal has nothing left to say. Both take the
-     * notification down.
+     * why; anything terminal has nothing left to say. Both take the parked
+     * notification down; the job's own goes with the job.
      */
     fun publishParked(
         transfer: TransferEntity,
@@ -108,10 +122,20 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
         val manager = context.getSystemService(NotificationManager::class.java)
         if (transfer.status in PARKED) {
             ensureChannel()
-            manager.notify(notificationId(transfer.id), build(transfer, null, accountNames))
+            manager.notify(parkedNotificationId(transfer.id), build(transfer, null, accountNames))
         } else {
-            manager.cancel(notificationId(transfer.id))
+            clearParked(transfer.id)
         }
+        // The job's own notification, in every case. Ignored while a job still
+        // owns it, which is why the UIDT job's end policy has to remove it;
+        // kept for the WorkManager path, where it is the app's again once the
+        // worker's foreground service has stopped.
+        manager.cancel(notificationId(transfer.id))
+    }
+
+    /** A transfer that runs again is no longer waiting, and the job's notification says so. */
+    fun clearParked(id: dev.thiagosindra.cloudlug.model.TransferId) {
+        context.getSystemService(NotificationManager::class.java).cancel(parkedNotificationId(id))
     }
 
     private fun action(label: String, action: TransferAction, transfer: TransferEntity): Notification.Action {
@@ -130,6 +154,8 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
 
     internal companion object {
         const val CHANNEL = "cloudlug.transfers"
+
+        private const val PARKED_SUFFIX = "#parked"
 
         /** §13.1's waiting states: stopped, not finished, and not by the user. */
         private val PARKED = setOf(

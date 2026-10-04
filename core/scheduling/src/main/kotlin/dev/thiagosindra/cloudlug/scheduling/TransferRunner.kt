@@ -44,6 +44,7 @@ class TransferRunner @Inject constructor(
      */
     suspend fun run(id: TransferId, scope: CoroutineScope, publish: suspend (Notification) -> Unit): TransferStatus {
         notifications.ensureChannel()
+        notifications.clearParked(id)
 
         // Progress comes from the database rather than from the engine, for the
         // same reason §24.3 does: the rows are authoritative (§2.4), so what
