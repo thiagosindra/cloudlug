@@ -77,6 +77,17 @@ fun providerLabel(type: dev.thiagosindra.cloudlug.model.ProviderType): String = 
 }
 
 /**
+ * What a person calls the top of an account of this provider, for §24.2's
+ * review ("created at the top of My Drive").
+ */
+fun rootLabel(type: dev.thiagosindra.cloudlug.model.ProviderType): String = when (type) {
+    dev.thiagosindra.cloudlug.model.ProviderType.DROPBOX -> "your Dropbox"
+    dev.thiagosindra.cloudlug.model.ProviderType.GOOGLE_DRIVE -> "My Drive"
+    dev.thiagosindra.cloudlug.model.ProviderType.FAKE,
+    dev.thiagosindra.cloudlug.model.ProviderType.FAKE_DESTINATION -> "the demo account"
+}
+
+/**
  * How §24.1 and §24.3 name a transfer's two ends.
  *
  * The provider alone was enough while a provider meant an account. Since v0.4

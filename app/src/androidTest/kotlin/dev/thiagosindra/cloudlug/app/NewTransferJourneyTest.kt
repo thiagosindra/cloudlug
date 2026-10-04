@@ -74,6 +74,10 @@ class NewTransferJourneyTest {
         // the engine runs end to end inside the app rather than only in JVM
         // tests.
         compose.awaitText("5. Review", timeoutMillis = 60_000)
+        // §24.2 step 5 names the enclosing folder and where it will appear,
+        // so it can be found afterwards (spec-proposals/v1.6 §2).
+        compose.awaitText("CloudLug - ")
+        compose.awaitText("will be created in /My Drive.")
         compose.node("Start transfer").performClick()
 
         // Starting replaces the wizard with the transfer's detail screen —

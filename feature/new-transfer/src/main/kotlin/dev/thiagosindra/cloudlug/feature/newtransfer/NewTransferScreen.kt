@@ -193,6 +193,13 @@ fun NewTransferScreen(
                             canGoUp = state.destinationPath.isNotEmpty(),
                             onUp = viewModel::destinationUp,
                         )
+                        state.destinationPickerNote?.let { note ->
+                            Text(
+                                note,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
+                        }
                         // No checkbox on the rows: the row that names a folder
                         // is the row that opens it, so a control meaning
                         // "select" would leave no way to look inside first.
@@ -346,6 +353,16 @@ private fun Review(state: WizardState, viewModel: NewTransferViewModel) {
                 // way round this transfer goes.
                 Text(state.directionLabel(), style = MaterialTheme.typography.titleSmall)
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                // §24.2 step 5's "destination enclosing folder": its name, and
+                // where it will appear, so the user can find it afterwards
+                // (spec-proposals/v1.6 §2).
+                state.enclosingFolderName?.let { name ->
+                    ReviewRow("Folder", "\u201C$name\u201D")
+                    state.enclosingFolderPlacement?.let { placement ->
+                        Text(placement, style = MaterialTheme.typography.bodySmall)
+                    }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                }
                 ReviewRow("Files", formatCount(summary.files))
                 ReviewRow("Folders", formatCount(summary.folders))
                 ReviewRow(

@@ -71,10 +71,17 @@ object GoogleOAuth {
      * `drive.readonly` or `drive`, so the same adapter serves a self-build that
      * has them without a code change.
      */
-    fun rolesFor(grantedScopes: Set<String>): AccountRoles = AccountRoles(
-        canBeSource = SCOPE_READONLY in grantedScopes || SCOPE_FULL in grantedScopes,
-        canBeDestination = SCOPE_FILE in grantedScopes || SCOPE_FULL in grantedScopes,
-    )
+    fun rolesFor(grantedScopes: Set<String>): AccountRoles {
+        val readsEverything = SCOPE_READONLY in grantedScopes || SCOPE_FULL in grantedScopes
+        return AccountRoles(
+            canBeSource = readsEverything,
+            canBeDestination = SCOPE_FILE in grantedScopes || SCOPE_FULL in grantedScopes,
+            // §8.2 as corrected by v1.6 §1: drive.file alone sees only what
+            // CloudLug created, so the destination picker shows My Drive and
+            // CloudLug's own folders and nothing else.
+            seesOnlyOwnObjects = !readsEverything,
+        )
+    }
 
     /** Google reports what it granted as one space-separated `scope` string. */
     fun parseScopes(scope: String?): Set<String> =
