@@ -26,11 +26,19 @@ interface TransferScheduler {
     /**
      * Re-enqueues everything `SchedulingPolicy` says has work left.
      *
-     * Called on boot and on app start. Idempotent by construction: enqueueing a
-     * transfer the platform already holds replaces that job rather than adding
-     * a second.
+     * Called on boot and whenever the app comes to the foreground. Idempotent,
+     * and it must stay so without restarting anything: a job the platform is
+     * already running is left alone (`SchedulingPolicy.shouldSchedule`), while
+     * one it is only holding is replaced.
      */
     suspend fun reconcile()
+
+    /**
+     * Why the platform is holding [id]'s job rather than running it, as a
+     * lower-case phrase that completes "Interrupted — " in §24.3, or null when it is running, absent, or the platform
+     * will not say. Callers must not read null as "running".
+     */
+    suspend fun holdReason(id: TransferId): String? = null
 }
 
 /**

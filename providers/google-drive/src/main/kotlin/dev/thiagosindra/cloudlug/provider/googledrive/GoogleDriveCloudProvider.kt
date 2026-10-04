@@ -4,6 +4,7 @@ import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.ProviderType
+import dev.thiagosindra.cloudlug.network.StreamingRequestBody
 import dev.thiagosindra.cloudlug.provider.Chunk
 import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudDownload
@@ -269,7 +270,8 @@ class GoogleDriveCloudProvider(
             session.request.account,
             sessionUri(session),
             range,
-            chunk.bytes.toRequestBody(null, 0, chunk.length),
+            // Streamed from the chunk's cache file: one buffer per chunk, not two.
+            StreamingRequestBody(chunk.length.toLong(), open = chunk::openStream),
         )
         val progress = interpret(session, answer)
         if (!progress.complete && progress.acknowledgedBytes < chunk.endExclusive) {

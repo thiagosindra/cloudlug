@@ -1,5 +1,6 @@
 package dev.thiagosindra.cloudlug.transfer
 
+import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.HashAlgorithm
 import dev.thiagosindra.cloudlug.model.ItemStatusReason
 import dev.thiagosindra.cloudlug.model.NetworkState
@@ -109,6 +110,21 @@ class TransferEngineTest {
         assertEquals("destination_quota_insufficient", after.lastErrorCode)
 
         harness.cleanUp()
+    }
+
+    @Test
+    fun `a folder is created, and says so rather than claiming a verification`() = runTest {
+        val folder = harness.source.storage.folder("empty")
+        val transfer = harness.createTransfer()
+
+        harness.engine.prepare(transfer.id, harness.selectionOf(folder))
+        harness.engine.run(transfer.id)
+
+        // §24.3 printed "verified by destination hash" on folder rows. A folder
+        // has no bytes; it was created, and nothing was compared.
+        val item = harness.repository.listItems(transfer.id).single { it.objectKind == CloudObjectType.FOLDER }
+        assertEquals(TransferItemStatus.COMPLETED, item.status)
+        assertEquals(ItemStatusReason.CREATED_AT_DESTINATION, item.statusReason)
     }
 
     @Test

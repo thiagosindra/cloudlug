@@ -94,4 +94,43 @@ object SchedulingPolicy {
 
     /** The transfers to (re-)enqueue after process death or reboot (§2.4). */
     fun toEnqueue(transfers: List<TransferEntity>): List<TransferEntity> = transfers.filter(::isEnqueueable)
+
+    /**
+     * Whether to hand the platform a job for a transfer it may already hold.
+     *
+     * Never over one it is **executing**. On API 34+ scheduling a job id the
+     * platform is running stops the running job and starts a new one, and the
+     * stopped run does not stop at once: it is blocked in network I/O, holding
+     * a chunk, while the new one starts beside it. App launch reconciles, so
+     * every launch during a transfer did this (v0.6.1's `OutOfMemoryError`).
+     *
+     * A job that is only waiting is replaced, which is how a transfer left
+     * RUNNING with no worker gets one: a fresh job, with no backoff left over
+     * from the run that died.
+     */
+    fun shouldSchedule(platform: PlatformJobState): Boolean = platform != PlatformJobState.EXECUTING
+
+    /**
+     * Re-enqueues every transfer with work left, through [enqueue] (§2.4).
+     *
+     * Shared by both schedulers so the decision is made once and can be tested
+     * without a device. A transfer whose row says RUNNING is included on
+     * purpose: after process death nothing is running it, whatever the row
+     * says, and the scheduler decides whether a job already exists.
+     */
+    suspend fun reconcile(transfers: List<TransferEntity>, enqueue: suspend (TransferEntity) -> Unit) {
+        toEnqueue(transfers).forEach { enqueue(it) }
+    }
+}
+
+/** What the platform says about a transfer's job, as far as a scheduler can ask. */
+enum class PlatformJobState {
+    /** No job, or one the platform has finished with. */
+    NONE,
+
+    /** Scheduled, not running: a constraint, a quota, or the device's state is holding it. */
+    WAITING,
+
+    /** Running now. */
+    EXECUTING,
 }

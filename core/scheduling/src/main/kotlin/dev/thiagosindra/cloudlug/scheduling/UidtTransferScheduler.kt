@@ -12,6 +12,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.thiagosindra.cloudlug.database.TransferRepository
 import dev.thiagosindra.cloudlug.model.TransferId
 import dev.thiagosindra.cloudlug.transfer.schedule.NetworkRequirement
+import dev.thiagosindra.cloudlug.transfer.schedule.PlatformJobState
 import dev.thiagosindra.cloudlug.transfer.schedule.SchedulingPolicy
 import javax.inject.Inject
 
@@ -34,6 +35,7 @@ import javax.inject.Inject
 class UidtTransferScheduler @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val repository: TransferRepository,
+    private val notifications: TransferNotifications,
 ) : TransferScheduler {
 
     private val jobs = context.getSystemService(JobScheduler::class.java)
@@ -44,6 +46,9 @@ class UidtTransferScheduler @Inject constructor(
         // user pressed Start or Resume — and must be able to lift a pause.
         // reconcile() below is the automatic sweep and uses the stricter rule.
         if (!SchedulingPolicy.isStartable(transfer)) return
+        // Scheduling an id the platform is running stops that job and starts
+        // a new one beside it, before the old one has let go of its chunk.
+        if (!SchedulingPolicy.shouldSchedule(platformState(id))) return
 
         val network = when (SchedulingPolicy.networkFor(transfer)) {
             NetworkRequirement.UNMETERED -> JobInfo.NETWORK_TYPE_UNMETERED
@@ -75,7 +80,33 @@ class UidtTransferScheduler @Inject constructor(
     override suspend fun cancel(id: TransferId) = jobs.cancel(jobId(id))
 
     override suspend fun reconcile() {
-        SchedulingPolicy.toEnqueue(repository.listTransfers()).forEach { enqueue(it.id) }
+        SchedulingPolicy.reconcile(repository.listTransfers()) { transfer ->
+            enqueue(transfer.id)
+            // A job the platform holds runs nothing and posts nothing, so the
+            // shade would otherwise say nothing about a transfer that is not
+            // moving. This is where a battery saver shows up (§24.4).
+            holdReason(transfer.id)?.let { notifications.publishHeld(transfer, it) }
+        }
+    }
+
+    override suspend fun holdReason(id: TransferId): String? = when (jobs.getPendingJobReason(jobId(id))) {
+        // Our job declares no battery or charging constraint, so a battery
+        // saver or a low battery reaches us as the device's state.
+        JobScheduler.PENDING_JOB_REASON_DEVICE_STATE -> "held by Android: battery saver or the phone's state"
+        JobScheduler.PENDING_JOB_REASON_CONSTRAINT_BATTERY_NOT_LOW -> "held by Android until the battery is not low"
+        JobScheduler.PENDING_JOB_REASON_CONSTRAINT_CHARGING -> "held by Android until the phone is charging"
+        JobScheduler.PENDING_JOB_REASON_APP_STANDBY,
+        JobScheduler.PENDING_JOB_REASON_QUOTA,
+        JobScheduler.PENDING_JOB_REASON_BACKGROUND_RESTRICTION,
+        -> "held by Android: CloudLug's background work is being limited"
+        JobScheduler.PENDING_JOB_REASON_CONSTRAINT_CONNECTIVITY -> "waiting for a network this transfer allows"
+        else -> null
+    }
+
+    private fun platformState(id: TransferId): PlatformJobState = when (jobs.getPendingJobReason(jobId(id))) {
+        JobScheduler.PENDING_JOB_REASON_EXECUTING -> PlatformJobState.EXECUTING
+        JobScheduler.PENDING_JOB_REASON_INVALID_JOB_ID -> PlatformJobState.NONE
+        else -> PlatformJobState.WAITING
     }
 
     /**

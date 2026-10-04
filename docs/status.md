@@ -24,6 +24,76 @@ recovery is `SchedulingPolicy` re-read over rows (§2.4) — and the in-app
 execution and Google Drive moves to v0.6. Spec §33's table is amended in
 [`spec-proposals/v1.5.md`](spec-proposals/v1.5.md) §9.
 
+## v0.6.1 — the 2.5 GB run
+
+An overnight-style Dropbox → Google Drive transfer of several files, 2.5 GB in
+all, on a Samsung phone running Android 16, died with `OutOfMemoryError`
+mid-upload on a 256 MB heap. Afterwards the transfer read "Running" with
+nothing running, and reopening the app did not resume it. Folder rows also
+read "verified by destination hash".
+
+**What the reproduction showed, including what it did not.** The brief was a
+leak: something holding chunks across chunks or files. The JVM reproduction
+(`UploadHeapBoundTest`) runs the real engine and the real Drive adapter over
+OkHttp, against a MockWebServer that answers like Drive, with a source that
+generates 120 MiB in 8 MiB chunks. It measures the retained heap after every
+chunk. On the code that crashed, **one pipeline's heap is flat**: about
+16 MiB over HTTP/1.1 and about 26 MiB over HTTP/2. A first HTTP/2 run did
+climb by 9 MiB a chunk, but that was MockWebServer keeping every HTTP/2
+request body whatever `bodyLimit` says; once its log is drained, the climb
+goes away. With a chunk deliberately retained, the test fails at +108 MiB. It
+stays in the JVM suite, over HTTP/2, at about ninety seconds a run.
+
+**What multiplied the heap was several pipelines at once** — the crash
+report's own `StandaloneCoroutine{Cancelling}` says the failing thread
+belonged to a run that had already been told to stop:
+
+1. **Reconcile replaced a running job.** App launch reconciles, and on API
+   34+ scheduling a job id the platform is running stops that job and starts a
+   new one. So every launch during a transfer did this. (WorkManager's path
+   already used KEEP.)
+2. **A cancelled run did not stop.** Cancellation does not interrupt a thread
+   blocked in a socket read or an OkHttp call. The guard against two runners
+   asked `isActive`, which is false the moment cancel is called, so the new
+   run started beside the old one, while the old one still held its chunk
+   buffer, request body and download stream. `OneRunnerPerTransferTest`
+   reproduces it with a source that blocks a thread: two downloads open at
+   once on the old code, one on the new.
+3. **Each chunk cost two copies.** The chunk array, and then Okio's segments
+   when `toRequestBody` copies the whole array before sending any of it — the
+   frame the OOM was thrown from. Uploads now stream the cached chunk file
+   (`StreamingRequestBody`, in both adapters), and the read buffer is reused
+   across the file.
+
+The 19 dispatcher workers are a symptom of item 1, not a second leak.
+`Dispatchers.IO` lends up to 64 threads to blocking calls, and the worker
+number counts threads created over the process's life. Each overlapping run
+pins several: an OkHttp call, a Room query, the notification updater.
+
+**Fixed:**
+- One runner per transfer. A new run waits for a cancelled one to finish
+  unwinding, and pause and cancel leave the cancelled job registered until it
+  has. The chunk loop also checks for cancellation between reads.
+- Reconcile never replaces a job the platform is executing, and does replace
+  one that is only waiting, which clears any backoff left by the run that
+  died (`SchedulingPolicy.shouldSchedule`). It runs whenever the app is
+  STARTED rather than once in `onCreate`. STARTED is visible, which is what
+  scheduling a user-initiated job requires.
+- §24.3 says "Interrupted — resuming" for a RUNNING row that no worker in the
+  process owns. When the platform says why it is holding the job, the screen
+  says that instead: battery saver or the phone's state, a background limit,
+  or the network. On API 34+, reconcile also posts that reason as a §24.4
+  waiting notification.
+- Folder rows read "created at destination".
+
+**Not yet known, and only the phone can say:**
+- whether this run was also held by a low battery or battery saver. Nothing
+  recorded the platform's reason at the time. The next run will show it on
+  the detail screen and in the notification if it happens again;
+- that the 2.5 GB run now completes. The fix rests on the overlap mechanism
+  above, which is reproduced on the JVM. That it was the whole of the phone's
+  heap is an inference from the crash report, not a measurement.
+
 ## v0.6 delivered — Google Drive as a destination
 
 **Step 1 (merged): the tools.** `tools/drive-auth`, `drive-hash-check` and

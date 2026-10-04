@@ -71,7 +71,7 @@ class WorkManagerTransferScheduler @Inject constructor(
     }
 
     override suspend fun reconcile() {
-        SchedulingPolicy.toEnqueue(repository.listTransfers()).forEach { enqueue(it.id) }
+        SchedulingPolicy.reconcile(repository.listTransfers()) { enqueue(it.id) }
     }
 
     private fun workName(id: TransferId) = "cloudlug-transfer-${id.value}"

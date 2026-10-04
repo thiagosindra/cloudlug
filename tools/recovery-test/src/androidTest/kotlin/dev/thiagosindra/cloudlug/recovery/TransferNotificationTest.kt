@@ -3,6 +3,7 @@ package dev.thiagosindra.cloudlug.recovery
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Until
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +35,16 @@ class TransferNotificationTest {
         app.clearData()
         app.setWifi(true)
     }
+
+    /**
+     * And ends clean, for the suites that run after this one on the same
+     * device. `:app`'s journey cannot clear data from inside the app's own
+     * process, and a demo transfer left behind made its files read "already
+     * transferred". Its check for "verified by destination hash" kept passing
+     * only because folder rows claimed it too, until v0.6.1 labelled them.
+     */
+    @After
+    fun leaveClean() = app.clearData()
 
     @Test
     fun a_completed_transfer_leaves_no_notification_behind() {
