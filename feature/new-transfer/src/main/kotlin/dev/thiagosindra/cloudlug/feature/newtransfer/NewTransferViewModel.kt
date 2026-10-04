@@ -25,6 +25,7 @@ import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.transfer.manifest.EnclosingFolderNamer
 import dev.thiagosindra.cloudlug.ui.providerLabel
+import dev.thiagosindra.cloudlug.ui.rootLabel
 import dev.thiagosindra.cloudlug.transfer.manifest.ManifestSummary
 import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,6 +72,8 @@ data class WizardState(
     /** The chosen destination folder as the user saw it, for §24.2's review. */
     val destinationFolderLabel: String? = null,
     val networkPolicy: TransferNetworkPolicy = TransferNetworkPolicy.UNMETERED_ONLY,
+    /** §10's enclosing folder, named when the transfer is created at step 5. */
+    val enclosingFolderName: String? = null,
     val summary: ManifestSummary? = null,
     val transferId: TransferId? = null,
     val busy: Boolean = false,
@@ -105,6 +108,46 @@ data class WizardState(
         }
         return "${name(source)} -> ${name(destination)}"
     }
+
+    private val destinationAccount: ConnectedAccount?
+        get() = accounts.firstOrNull { it.account.id == destination }
+
+    /**
+     * Why the destination picker's list is short, when it is (v1.6 §2).
+     *
+     * Under Drive's `drive.file` the picker can show only My Drive and the
+     * folders CloudLug made. Said on the picker, so the user is not left
+     * looking for their own folders and concluding the app is broken.
+     */
+    val destinationPickerNote: String?
+        get() {
+            val connected = destinationAccount ?: return null
+            if (!connected.roles.seesOnlyOwnObjects) return null
+            val provider = connected.account.provider
+            return "Only ${rootLabel(provider)} and folders CloudLug created are shown. " +
+                "CloudLug can't see your other ${providerLabel(provider)} folders with the access it asks for."
+        }
+
+    /**
+     * Where §10's enclosing folder will appear, for the review step (§24.2
+     * step 5, v1.6 §2): named, and placed, so it is found afterwards. When
+     * the top of the account was the only choice the grant allowed, the line
+     * also says how to put the folder elsewhere.
+     */
+    val enclosingFolderPlacement: String?
+        get() {
+            val connected = destinationAccount ?: return null
+            if (enclosingFolderName == null || destinationFolderId == null) return null
+            val provider = connected.account.provider
+            val atRoot = destinationFolderId == destinationAccountRoot?.opaqueId
+            return when {
+                atRoot && connected.roles.seesOnlyOwnObjects ->
+                    "will be created at the top of ${rootLabel(provider)}; " +
+                        "you can move it afterwards in ${providerLabel(provider)}."
+                atRoot -> "will be created at the top of ${rootLabel(provider)}."
+                else -> "will be created in ${destinationFolderLabel ?: destinationLocation}."
+            }
+        }
 
     /** Where the browser is, as a path a person can read. */
     val sourceLocation: String get() = locationOf(sourcePath)
@@ -347,6 +390,7 @@ class NewTransferViewModel @Inject constructor(
             val destinationType = current.providerOf(destination)
                 ?: throw CloudException(CloudErrorKind.AUTH_REQUIRED, "the destination account is no longer connected")
 
+            val enclosingName = EnclosingFolderNamer.nameFor(clock.instant())
             val transfer = repository.createTransfer(
                 TransferEntity(
                     id = TransferId(UUID.randomUUID().toString()),
@@ -357,7 +401,7 @@ class NewTransferViewModel @Inject constructor(
                     destinationProvider = destinationType,
                     destinationAccountId = destination,
                     destinationRootId = destinationFolder,
-                    destinationContainerName = EnclosingFolderNamer.nameFor(clock.instant()),
+                    destinationContainerName = enclosingName,
                     networkPolicy = current.networkPolicy,
                 ),
             )
@@ -372,10 +416,16 @@ class NewTransferViewModel @Inject constructor(
                 transfer.id,
                 CloudSelection(source, current.selectedSources.values.toList()),
             )
-            transfer.id to summary
-        }.onSuccess { (id, summary) ->
+            Triple(transfer.id, summary, enclosingName)
+        }.onSuccess { (id, summary, enclosingName) ->
             _state.update {
-                it.copy(step = WizardStep.REVIEW, transferId = id, summary = summary, busy = false)
+                it.copy(
+                    step = WizardStep.REVIEW,
+                    transferId = id,
+                    summary = summary,
+                    enclosingFolderName = enclosingName,
+                    busy = false,
+                )
             }
         }.onFailure { failure ->
             // The user is still standing in the wizard and is about to read the

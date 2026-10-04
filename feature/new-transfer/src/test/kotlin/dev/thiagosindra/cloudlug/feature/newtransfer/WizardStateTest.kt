@@ -1,7 +1,10 @@
 package dev.thiagosindra.cloudlug.feature.newtransfer
 
+import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.ProviderType
+import dev.thiagosindra.cloudlug.provider.AccountRoles
+import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudObject
 import dev.thiagosindra.cloudlug.provider.CloudObjectId
 import dev.thiagosindra.cloudlug.provider.SelectionRoot
@@ -95,6 +98,56 @@ class WizardStateTest {
 
         val myDrive = obj("My Drive", CloudObjectType.FOLDER)
         assertEquals(myDrive.id, atRoot.copy(destinationPath = listOf(myDrive)).destinationHere)
+    }
+
+    // ------------------------------------------- v1.6 §2: a Drive destination
+
+    private val driveRoot = CloudObjectId(ProviderType.GOOGLE_DRIVE, "root")
+
+    private fun drive(seesOnlyOwn: Boolean) = ConnectedAccount(
+        CloudAccount(AccountId("drive"), ProviderType.GOOGLE_DRIVE, null, null, emptySet()),
+        AccountRoles(canBeSource = !seesOnlyOwn, canBeDestination = true, seesOnlyOwnObjects = seesOnlyOwn),
+    )
+
+    private fun reviewing(account: ConnectedAccount, folder: String = "root", label: String = "/") = WizardState(
+        step = WizardStep.REVIEW,
+        accounts = listOf(account),
+        destination = account.account.id,
+        destinationAccountRoot = driveRoot,
+        destinationFolderId = folder,
+        destinationFolderLabel = label,
+        enclosingFolderName = "CloudLug - 2026-10-04 12-00",
+    )
+
+    @Test
+    fun `a drive_file destination at the top of My Drive says so, and how to move it`() {
+        assertEquals(
+            "will be created at the top of My Drive; you can move it afterwards in Google Drive.",
+            reviewing(drive(seesOnlyOwn = true)).enclosingFolderPlacement,
+        )
+    }
+
+    @Test
+    fun `one of CloudLug's own folders is named instead, with no advice to move anything`() {
+        assertEquals(
+            "will be created in /Backups.",
+            reviewing(drive(seesOnlyOwn = true), folder = "backups-id", label = "/Backups").enclosingFolderPlacement,
+        )
+    }
+
+    @Test
+    fun `a grant that sees everything gets the plain placement`() {
+        assertEquals("will be created at the top of My Drive.", reviewing(drive(seesOnlyOwn = false)).enclosingFolderPlacement)
+    }
+
+    @Test
+    fun `the picker explains a short list only when the grant makes it short`() {
+        val narrow = WizardState(accounts = listOf(drive(seesOnlyOwn = true)), destination = AccountId("drive"))
+        val note = narrow.destinationPickerNote
+        assertTrue(note != null && "Only My Drive and folders CloudLug created are shown" in note, note)
+
+        val wide = WizardState(accounts = listOf(drive(seesOnlyOwn = false)), destination = AccountId("drive"))
+        assertEquals(null, wide.destinationPickerNote)
     }
 
     // ------------------------------------------------------------------ helpers

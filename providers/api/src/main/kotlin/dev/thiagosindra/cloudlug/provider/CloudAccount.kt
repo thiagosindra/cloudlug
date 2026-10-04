@@ -29,6 +29,18 @@ data class CloudAccount(
  * build can hold one account the user granted everything and another where they
  * declined at the consent screen.
  */
-data class AccountRoles(val canBeSource: Boolean, val canBeDestination: Boolean) {
+data class AccountRoles(
+    val canBeSource: Boolean,
+    val canBeDestination: Boolean,
+    /**
+     * True when this grant sees only the objects this app created, so a
+     * destination picker cannot show the user's own folders (Drive under
+     * `drive.file`, spec-proposals/v1.6 §1–2). The wizard says so rather than
+     * letting the user look for folders that will never appear. Callers must
+     * not read false as "can see everything" for a provider that has no such
+     * notion; it means only that nothing narrower is known.
+     */
+    val seesOnlyOwnObjects: Boolean = false,
+) {
     val canDoNothing: Boolean get() = !canBeSource && !canBeDestination
 }

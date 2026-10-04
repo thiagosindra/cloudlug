@@ -50,6 +50,7 @@ class GoogleOAuthTest {
         val roles = GoogleOAuth.rolesFor(GoogleOAuth.parseScopes(GoogleOAuth.SCOPE_FILE))
         assertTrue(roles.canBeDestination)
         assertFalse(roles.canBeSource)
+        assertTrue(roles.seesOnlyOwnObjects, "drive.file cannot see the user's own folders (v1.6 §1)")
     }
 
     @Test
@@ -59,6 +60,7 @@ class GoogleOAuthTest {
         )
         assertTrue(roles.canBeSource)
         assertTrue(roles.canBeDestination)
+        assertFalse(roles.seesOnlyOwnObjects)
     }
 
     @Test

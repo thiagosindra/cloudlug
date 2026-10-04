@@ -64,6 +64,16 @@ type, so the demo destination moved to its own debug-only
 `FAKE_DESTINATION`. Without that move, a real Drive account's transfer would
 have gone into the in-memory fake and reported success.
 
+**Step 3: the wizard offers Dropbox → Google Drive honestly.** Under
+`drive.file` the destination picker can show only My Drive and CloudLug's own
+folders. The picker now says so, rather than leaving the user looking for
+folders that will never appear. The review step names the enclosing folder,
+which §24.2 step 5 asked for and which had never been shown. It also says where
+the folder will appear. When the top of My Drive was the only choice, it adds
+that the folder can be moved afterwards in Google Drive (v1.6 §2). The signal
+is a new provider-neutral `AccountRoles.seesOnlyOwnObjects`, set from the
+granted scopes, so a self-build with `drive.readonly` sees neither line.
+
 ### Real Drive, recordings only, or nothing yet
 
 **Run against real Google Drive:**
@@ -195,7 +205,7 @@ still need none, which the `jvm` CI job proves by naming them explicitly.
 | `:core:transfer` | Manifest builder (§10, §11, §20), collision algorithm (§19.3), retry policy (§23), verification (§21), network policy (§16), pipeline (§14), engine (§13.1, §22), `TransferController` (§35), **`SchedulingPolicy`** — which transfers have work left and what network each needs (§16, §17) | 95 |
 | `:providers:fake` | `FakeCloudProvider` with the §31.3 failure injections, including per-chunk read and upload delays; the §31.2 contract suite in test fixtures | 59 |
 | `:core:network` | The shared OkHttp stack and §26's redaction interceptor: a deny-by-default header allow-list, and no branch that can print a body | 9 |
-| `:providers:google-drive` | The Drive adapter (§5 destination surface, §23 mapping, §22.5 resumable sessions), `GoogleOAuth`, §8.3's token source; replay of every captured route and the engine handoff | 55 + 23 live |
+| `:providers:google-drive` | The Drive adapter (§5 destination surface, §23 mapping, §22.5 resumable sessions), `GoogleOAuth`, §8.3's token source; replay of every captured route, the engine handoff and main-safety | 59 + 23 live |
 | `:providers:dropbox` | The adapter (§5 surface, §23 mapping, §22.5 offset recovery), PKCE and the OAuth forms (§8.1), the token endpoint, and §8.3's token source | 95 |
 | `:core:security` | `SecretStore` and the Keystore-backed AES-GCM implementation (§8.3) | 11 instrumented |
 | `:core:scheduling` | §17: the two platform schedulers, `TransferRunner`, §24.4's notification with its Pause and Cancel actions, the boot receiver | — |
@@ -566,7 +576,13 @@ counter (§11).
    the amended §2.2 rule — but no Dropbox-to-Dropbox transfer has run, because
    that needs two real accounts connected on a phone. Until it does, the
    engine has still only ever moved bytes between two fakes.
-8. **Nothing enforces main-safety anywhere else.** `MainSafetyTest` covers
+8. ~~**Nothing enforces main-safety anywhere else.**~~ Drive has its own
+   `DriveMainSafetyTest` as of v0.6, covering the code exchange,
+   `authenticate`, the picker's listing and `prepareDestination`. Each test
+   fails when the call stops switching threads. It is still a test per
+   module rather than a shared fixture.
+
+   Originally: **Nothing enforces main-safety anywhere else.** `MainSafetyTest` covers
    `:providers:dropbox`, which is where the blocking is today. Google Drive's
    adapter will have the same shape and nothing would catch a repeat except
    another hand-written test per module. A shared test fixture, the way §31.2's
@@ -658,36 +674,54 @@ If either fails, the useful artefacts are the §24.3 screen (which now shows the
 failed item's `lastErrorMessage`, not just its category) and the transfer's
 file counts.
 
-## What v0.6 (Google Drive destination) needs from you
+## What v0.6 needs from you to be done
 
-Two things need your account rather than code, and one gates the other.
-Registration is not instant, so they are worth starting before the code is.
+The code is complete. What is left needs your account, your phone, or both.
 
-1. **Confirm Google's scope classification, before any Drive code.** As of
-   2026-09-21, out of band: `drive.file` non-sensitive, `drive.readonly`
-   restricted with annual CASA. That is what makes Drive destination-only in
-   the Play build (§8.2), and it is worth re-confirming because it is the one
-   input that could invalidate the milestone's shape rather than its schedule.
-2. **A Google Cloud project with an OAuth client for Android**, package
-   `dev.thiagosindra.cloudlug` and the debug signing certificate's SHA-1, with
-   the Drive API enabled and `drive.file` requested. **No client secret** —
-   §8.1 is PKCE-only, the same as Dropbox, and I will not ask for one.
-3. **A scratch Google account** and a `DRIVE_TEST_ROOT` folder inside it, the
-   way `DROPBOX_TEST_ROOT` works today: the live contract gate refuses to run
-   without it and never addresses the account root.
+1. **The §36 hash-check output.** Run `validateDriveHashes`, locally or from
+   the Actions tab. So far only the two captured uploads have been compared
+   with real Drive checksums. The 8 MiB and ~10 MiB cases, the restore across
+   a chunk boundary, and a file of your own have not.
+2. **The live contract suite**, from **Drive live contract tests** in the
+   Actions tab. Nothing has run it against real Drive. While the OAuth app is
+   in Testing status, the refresh token behind it expires every seven days.
+3. **The first real Dropbox → Google Drive transfer, on your phone.** Watch
+   for these:
+   - The Google sign-in, which nothing has run end to end: Custom Tab,
+     custom-scheme redirect, code exchange, `about.get`, then the account row.
+   - The picker note, and the review's "created at the top of My Drive" line.
+   - Every file ending "verified by destination hash".
+   - The folder appearing in My Drive under the name the review showed.
+   - Disconnecting Google Drive afterwards, which revokes the grant. The app
+     should then disappear from your Google account's third-party access
+     list.
 
-And one thing I would ask for, which is not blocking:
+   If the sign-in fails at the redirect, check first that "Enable custom URI
+   scheme" is still on for the Android client (v1.6 §4).
 
-4. **A second fixture-capture run against Dropbox seeding more than one entry
-   in the workspace**, so `list_folder` paging is non-degenerate. The last run
-   asked for `limit=1` against a workspace holding one object, so `has_more`
-   came back `false` and the continue route returned nothing. A real multi-page
-   listing is still unexercised offline, and paging is where §11's cursor
-   resume lives.
+## What v0.7 needs
 
-Finally, one decision that is yours: **the API 34+ emulator matrix entry.** It
-is the only way to exercise the UIDT branch in CI, and it is its own PR because
-an API 34 AVD has failed to boot on these runners before. If it cannot be made
-reliable, the honest outcome is to say so here and accept UIDT as
-device-verified only — which is a real reduction in confidence, since UIDT is
-the branch that runs on every phone shipping today.
+v0.7 is the public beta (§33 as amended by v1.5 §9: everything below v0.6
+shifts by one).
+
+- **Move the Google OAuth app to Production.** This is the non-restricted
+  verification for `drive.file`. Until then, every Drive account stops working
+  seven days after it connects. §23 reports that correctly as
+  `AUTH_REQUIRED`, but no beta user should be expected to put up with it.
+- **A release Android OAuth client**, with your release certificate's SHA-1,
+  kept out of this repository (`docs/oauth.md`). It needs the custom URI
+  scheme enabled too, if Google still offers it for new clients. If not, v1.6
+  §4's fallback becomes v0.7 work.
+- **Decide the package name before the first Play upload**, because the
+  application id is permanent there. Changing it later invalidates both OAuth
+  clients and the Dropbox redirect.
+- **Fold v1.5 and v1.6 into the spec.** v1.6 holds the §8.2 correction, the
+  §24.2 picker and review wording, §10's duplicate-folder refusal, §6 and §21's
+  second hash, §5's grant-based source rule, and the §8.4 decision with its
+  risk.
+- **The two device runs v0.5 asked for**, now with Drive as the destination:
+  an overnight multi-gigabyte transfer with the screen off, and a force-stop
+  mid-file. A real Drive session survives process death, unlike the fake's,
+  and `finishUpload`'s recovery from a completed session has only run against
+  recordings.
+- **The API 34+ emulator entry**, still: the UIDT branch has never run in CI.
