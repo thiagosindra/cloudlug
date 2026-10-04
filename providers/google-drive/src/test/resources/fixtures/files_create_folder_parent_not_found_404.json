@@ -1,0 +1,15 @@
+{
+  "error": {
+    "code": 404,
+    "message": "File not found: FIXTURE0009xxxxxxxxxxxxxxxxxxxxxx.",
+    "errors": [
+      {
+        "message": "File not found: FIXTURE0009xxxxxxxxxxxxxxxxxxxxxx.",
+        "domain": "global",
+        "reason": "notFound",
+        "location": "fileId",
+        "locationType": "parameter"
+      }
+    ]
+  }
+}

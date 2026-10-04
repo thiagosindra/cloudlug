@@ -1,0 +1,8 @@
+{
+  "id": "FIXTURE0006xxxxxxxxxxxxxxxxxxxxxx",
+  "name": "nested",
+  "mimeType": "application/vnd.google-apps.folder",
+  "parents": [
+    "FIXTURE0004xxxxxxxxxxxxxxxxxxxxxx"
+  ]
+}
