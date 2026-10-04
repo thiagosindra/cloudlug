@@ -177,7 +177,10 @@ private fun ProviderCard(
                     // transfer (§2.2 as amended), so connecting another is a
                     // normal thing to want rather than an edge case.
                     OutlinedButton(onClick = onConnect, enabled = enabled) {
-                        Text(if (row.connected) "Connect another account" else "Connect")
+                        // Named per provider: two rows each with a bare "Connect"
+                        // reads the same to a screen reader, and to a test.
+                        val name = providerLabel(row.provider)
+                        Text(if (row.connected) "Connect another $name account" else "Connect $name")
                     }
                 }
             }

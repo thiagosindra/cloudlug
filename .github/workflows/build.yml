@@ -245,7 +245,12 @@ jobs:
           # whatever the other two would have said, which on the run that
           # added :tools:recovery-test meant learning nothing at all about the
           # two scenarios it exists for.
-          script: ./gradlew --continue :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest :tools:recovery-test:connectedDebugAndroidTest
+          # --no-parallel: one emulator, one suite at a time. With
+          # org.gradle.parallel the :app and :tools:recovery-test suites ran
+          # interleaved on the same device against the same installed app,
+          # each starting demo transfers of the same tree, so what one test
+          # found depended on how far the other had got.
+          script: ./gradlew --continue --no-parallel :app:connectedDebugAndroidTest :core:security:connectedDebugAndroidTest :tools:recovery-test:connectedDebugAndroidTest
 
       - name: Print the instrumentation results
         if: failure()

@@ -101,6 +101,7 @@ dependencies {
     implementation(project(":core:scheduling"))
     implementation(project(":providers:api"))
     implementation(project(":providers:dropbox"))
+    implementation(project(":providers:google-drive"))
     implementation(project(":core:network"))
     implementation(project(":core:security"))
     implementation(project(":core:auth"))

@@ -9,6 +9,7 @@ import dagger.hilt.components.SingletonComponent
 import dev.thiagosindra.cloudlug.auth.AccountConnector
 import dev.thiagosindra.cloudlug.auth.AccountRepository
 import dev.thiagosindra.cloudlug.auth.DropboxConnector
+import dev.thiagosindra.cloudlug.auth.GoogleDriveConnector
 import dev.thiagosindra.cloudlug.auth.KeystoreRefreshTokens
 import dev.thiagosindra.cloudlug.auth.PendingAuthorization
 import dev.thiagosindra.cloudlug.database.dao.CloudLugDatabase
@@ -17,15 +18,19 @@ import dev.thiagosindra.cloudlug.network.RedactingLogInterceptor
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxCloudProvider
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxTokenClient
 import dev.thiagosindra.cloudlug.provider.dropbox.StoredDropboxTokenSource
+import dev.thiagosindra.cloudlug.provider.googledrive.DriveTokenClient
+import dev.thiagosindra.cloudlug.provider.googledrive.GoogleDriveCloudProvider
+import dev.thiagosindra.cloudlug.provider.googledrive.StoredDriveTokenSource
 import dev.thiagosindra.cloudlug.security.KeystoreSecretStore
 import dev.thiagosindra.cloudlug.security.SecretStore
 import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import okhttp3.OkHttpClient
+import javax.inject.Named
 import javax.inject.Singleton
 
 /**
- * §8's half of the graph: the credential store, the OAuth flow, and the real
- * Dropbox adapter that depends on both.
+ * §8's half of the graph: the credential stores, the OAuth flows, and the real
+ * Dropbox and Google Drive adapters that depend on them.
  *
  * Separate from [DemoProvidersModule] because the two answer different
  * questions. That one exists so the engine can be driven with no account at
@@ -94,18 +99,62 @@ object AuthModule {
         tokenClient: DropboxTokenClient,
     ) = DropboxConnector(context, provider, tokens, refreshTokens, pending, tokenClient)
 
+    // ---------------------------------------------------------------- Google Drive
+
+    /** Its own key prefix, so a Drive credential can never land on a Dropbox key (§8.3). */
+    @Provides
+    @Singleton
+    @Named("drive")
+    fun driveRefreshTokens(secrets: SecretStore) = KeystoreRefreshTokens(secrets, ProviderType.GOOGLE_DRIVE)
+
+    /** Its own attempt, so a Dropbox sign-in and a Drive sign-in cannot consume each other's verifier. */
+    @Provides
+    @Singleton
+    @Named("drive")
+    fun drivePendingAuthorization(secrets: SecretStore) = PendingAuthorization(secrets, "google-drive.pending-authorization")
+
+    @Provides
+    @Singleton
+    fun driveTokenClient(client: OkHttpClient) = DriveTokenClient(client)
+
+    @Provides
+    @Singleton
+    fun driveTokens(
+        tokenClient: DriveTokenClient,
+        @Named("drive") refreshTokens: KeystoreRefreshTokens,
+        database: CloudLugDatabase,
+    ) = StoredDriveTokenSource(
+        tokens = tokenClient,
+        store = refreshTokens,
+        scopes = { account -> database.accounts.findById(account)?.grantedScopes.orEmpty() },
+    )
+
+    @Provides
+    @Singleton
+    fun driveProvider(tokens: StoredDriveTokenSource, client: OkHttpClient) = GoogleDriveCloudProvider(tokens, client)
+
+    @Provides
+    @Singleton
+    fun driveConnector(
+        @ApplicationContext context: Context,
+        provider: GoogleDriveCloudProvider,
+        tokens: StoredDriveTokenSource,
+        @Named("drive") refreshTokens: KeystoreRefreshTokens,
+        @Named("drive") pending: PendingAuthorization,
+        tokenClient: DriveTokenClient,
+    ) = GoogleDriveConnector(context, provider, tokens, refreshTokens, pending, tokenClient)
+
     /**
-     * Only Dropbox connects in v0.3.
-     *
-     * Google Drive is v0.4 and the demo provider needs no account at all, so
-     * neither has a connector. §24.5's screen reads the absence as "this build
-     * cannot connect that yet" rather than being handed a connector that
-     * throws.
+     * Dropbox since v0.3, Google Drive since v0.6. The demo providers need no
+     * account, so they have no connector, and §24.5 leaves them out.
      */
     @Provides
     @Singleton
-    fun connectors(dropbox: DropboxConnector): Map<ProviderType, @JvmSuppressWildcards AccountConnector> =
-        mapOf(ProviderType.DROPBOX to dropbox)
+    fun connectors(
+        dropbox: DropboxConnector,
+        drive: GoogleDriveConnector,
+    ): Map<ProviderType, @JvmSuppressWildcards AccountConnector> =
+        mapOf(ProviderType.DROPBOX to dropbox, ProviderType.GOOGLE_DRIVE to drive)
 
     @Provides
     @Singleton

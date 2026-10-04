@@ -40,7 +40,7 @@ data class ConnectedAccount(val account: CloudAccount, val roles: AccountRoles?)
 data class AccountRow(
     val provider: ProviderType,
     val accounts: List<ConnectedAccount>,
-    /** False for a provider this build cannot connect yet (Google Drive). */
+    /** False for a provider this build has no connector for. */
     val connectable: Boolean,
 ) {
     val connected: Boolean get() = accounts.isNotEmpty()
@@ -103,7 +103,7 @@ class AccountsViewModel @Inject constructor(
      * wizard offers it, but it has no account, no sign-in and nothing to
      * revoke — a row for it could only ever say so.
      */
-    private val supported = available.types.filterNot { it == ProviderType.FAKE }
+    private val supported = available.types.filterNot { it == ProviderType.FAKE || it == ProviderType.FAKE_DESTINATION }
     private val local = MutableStateFlow(LocalState())
 
     private data class LocalState(

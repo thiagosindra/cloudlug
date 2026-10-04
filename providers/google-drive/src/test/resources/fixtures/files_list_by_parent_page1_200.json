@@ -1,0 +1,35 @@
+{
+  "files": [
+    {
+      "md5Checksum": "5289df737df57326fcdd22597afb1fac",
+      "mimeType": "application/octet-stream",
+      "parents": [
+        "FIXTURE0004xxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "size": "3",
+      "id": "FIXTURE0003xxxxxxxxxxxxxxxxxxxxxx",
+      "name": "duplicate.bin",
+      "trashed": false,
+      "createdTime": "2026-10-04T01:58:34.678Z",
+      "modifiedTime": "2026-10-04T01:58:34.678Z",
+      "version": "1",
+      "sha256Checksum": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+    },
+    {
+      "md5Checksum": "5289df737df57326fcdd22597afb1fac",
+      "mimeType": "application/octet-stream",
+      "parents": [
+        "FIXTURE0004xxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "size": "3",
+      "id": "FIXTURE0002xxxxxxxxxxxxxxxxxxxxxx",
+      "name": "duplicate.bin",
+      "trashed": false,
+      "createdTime": "2026-10-04T01:58:32.849Z",
+      "modifiedTime": "2026-10-04T01:58:32.849Z",
+      "version": "1",
+      "sha256Checksum": "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81"
+    }
+  ],
+  "nextPageToken": "FIXTURE0010xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}

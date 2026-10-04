@@ -1,0 +1,19 @@
+{
+  "files": [
+    {
+      "md5Checksum": "72c1c65bebf24880243198d05295313a",
+      "mimeType": "application/octet-stream",
+      "parents": [
+        "FIXTURE0006xxxxxxxxxxxxxxxxxxxxxx"
+      ],
+      "size": "263144",
+      "id": "FIXTURE0009xxxxxxxxxxxxxxxxxxxxxx",
+      "name": "captured.bin",
+      "trashed": false,
+      "createdTime": "2026-10-04T01:58:29.807Z",
+      "modifiedTime": "2026-10-04T01:58:29.807Z",
+      "version": "2",
+      "sha256Checksum": "77918d5e8db6dcc3244ffc3280d2c159f451c6ce370d166862826d0978e78c55"
+    }
+  ]
+}

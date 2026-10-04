@@ -143,4 +143,36 @@ class VerificationTest {
         )
         assertIs<VerificationResult.Unverifiable>(result)
     }
+
+    // --------------------------------------------- §19.4: compare whichever is returned
+
+    private val sha = ProviderHash(HashAlgorithm.SHA256, "aa".repeat(32))
+    private val otherSha = ProviderHash(HashAlgorithm.SHA256, "bb".repeat(32))
+
+    private suspend fun verifyWithSha(reported: List<ProviderHash>) = DestinationVerifier.verify(
+        uploaded = uploaded(hash = expected).copy(additionalHashes = reported),
+        expectedNativeHash = expected,
+        expectedSize = 100,
+        capabilities = hashingProvider,
+        resolveMetadata = { error("not needed") },
+        expectedSha256 = sha,
+    )
+
+    @Test
+    fun `a reported SHA-256 that disagrees is a mismatch even when the native hash agrees`() = runTest {
+        assertIs<VerificationResult.Mismatch>(verifyWithSha(listOf(otherSha)))
+    }
+
+    @Test
+    fun `a reported SHA-256 that agrees leaves the native verdict standing`() = runTest {
+        assertEquals(
+            ItemStatusReason.VERIFIED_BY_DESTINATION_HASH,
+            assertIs<VerificationResult.Verified>(verifyWithSha(listOf(sha))).reason,
+        )
+    }
+
+    @Test
+    fun `no SHA-256 from the destination changes nothing`() = runTest {
+        assertIs<VerificationResult.Verified>(verifyWithSha(emptyList()))
+    }
 }

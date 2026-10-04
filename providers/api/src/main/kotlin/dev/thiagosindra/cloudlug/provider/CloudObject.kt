@@ -40,6 +40,14 @@ data class CloudObject(
     val mimeType: String?,
     /** Export MIME types, for [CloudObjectType.PROVIDER_NATIVE_DOCUMENT] only (spec §20.1). */
     val exportFormats: List<String>? = null,
+    /**
+     * Further hashes the provider reported besides [providerHash] — Drive's
+     * `sha256Checksum` beside its MD5 (spec §19.4: "compare whichever is
+     * returned"). Verification checks any of these it can compute; callers
+     * must not assume the list is ever non-empty, or that it names the native
+     * algorithm.
+     */
+    val additionalHashes: List<ProviderHash> = emptyList(),
 ) {
     val isFolder: Boolean get() = type == CloudObjectType.FOLDER
 

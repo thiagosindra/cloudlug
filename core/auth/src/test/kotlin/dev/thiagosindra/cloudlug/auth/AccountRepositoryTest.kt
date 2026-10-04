@@ -180,21 +180,23 @@ class AccountRepositoryTest {
     }
 
     @Test
-    fun `granted scopes for a provider nobody connected are empty, not an error`() = runTest {
-        assertTrue(repository.grantedScopes(ProviderType.DROPBOX).isEmpty())
-        assertNull(repository.connected(ProviderType.DROPBOX))
+    fun `granted scopes for an account nobody connected are empty, not an error`() = runTest {
+        assertTrue(repository.grantedScopes(AccountId("nobody")).isEmpty())
+        assertNull(repository.find(AccountId("nobody")))
     }
 
     @Test
     fun `disconnecting an account whose provider has no connector just forgets it`() = runTest {
         // A demo row, or a provider a later build stopped supporting. There is
-        // no grant to revoke. Looking the connector up with error() threw
+        // no grant to revoke. Since v0.6 the accounts screen no longer lists
+        // demo rows, so this is the only test of the path; the instrumented
+        // one that pressed Disconnect on the demo Drive row went with it. Looking the connector up with error() threw
         // IllegalStateException, which is not a CloudException, so it fell past
         // §24.5's error handling and crashed the app on a button press.
         database.accounts.upsert(
             AccountEntity(
                 id = AccountId("demo-destination"),
-                provider = ProviderType.GOOGLE_DRIVE,
+                provider = ProviderType.FAKE_DESTINATION,
                 providerAccountId = "demo-destination",
                 grantedScopes = emptySet(),
                 createdAt = Instant.parse("2026-09-22T10:00:00Z"),

@@ -14,6 +14,14 @@ enum class ProviderType {
 
     /** Test-only provider used by the contract suite and the app demo (spec §31.3). */
     FAKE,
+
+    /**
+     * The demo's destination, in debug builds only. Until v0.6 the demo wrote
+     * into a fake registered as [GOOGLE_DRIVE]; with a real Drive adapter that
+     * type must mean real Drive, or a connected Drive account's transfer would
+     * land in an in-memory fake and report success.
+     */
+    FAKE_DESTINATION,
 }
 
 /** Identifies a connected account (spec §7). Multiple accounts per provider are supported. */

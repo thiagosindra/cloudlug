@@ -81,7 +81,7 @@ class NewTransferJourneyTest {
         // transfer reaches home rather than step 5 — so the wizard's own
         // "Transfer started." is never drawn. §24.3 is where a started
         // transfer is observable.
-        compose.awaitText("Demo provider -> Google Drive", timeoutMillis = 30_000)
+        compose.awaitText("Demo provider -> Demo destination", timeoutMillis = 30_000)
 
         // And it does not merely start. The engine runs to completion inside
         // the app, with every item verified at the destination per §21, which

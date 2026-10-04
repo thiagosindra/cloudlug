@@ -73,6 +73,7 @@ fun providerLabel(type: dev.thiagosindra.cloudlug.model.ProviderType): String = 
     dev.thiagosindra.cloudlug.model.ProviderType.DROPBOX -> "Dropbox"
     dev.thiagosindra.cloudlug.model.ProviderType.GOOGLE_DRIVE -> "Google Drive"
     dev.thiagosindra.cloudlug.model.ProviderType.FAKE -> "Demo provider"
+    dev.thiagosindra.cloudlug.model.ProviderType.FAKE_DESTINATION -> "Demo destination"
 }
 
 /**

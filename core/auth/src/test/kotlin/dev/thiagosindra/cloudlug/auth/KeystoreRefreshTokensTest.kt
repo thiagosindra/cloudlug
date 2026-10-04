@@ -1,6 +1,7 @@
 package dev.thiagosindra.cloudlug.auth
 
 import dev.thiagosindra.cloudlug.model.AccountId
+import dev.thiagosindra.cloudlug.model.ProviderType
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -17,6 +18,25 @@ class KeystoreRefreshTokensTest {
 
     private val secrets = FakeSecretStore()
     private val tokens = KeystoreRefreshTokens(secrets)
+
+    @Test
+    fun `a Drive credential and a Dropbox credential never share a key, even for one account id`() {
+        val drive = KeystoreRefreshTokens(secrets, ProviderType.GOOGLE_DRIVE)
+        tokens.write(SOURCE, "dropbox-refresh-token")
+        drive.write(SOURCE, "drive-refresh-token")
+
+        assertEquals("dropbox-refresh-token", tokens.read(SOURCE))
+        assertEquals("drive-refresh-token", drive.read(SOURCE))
+        drive.clear(SOURCE)
+        assertEquals("dropbox-refresh-token", tokens.read(SOURCE), "clearing Drive must not disconnect Dropbox")
+    }
+
+    @Test
+    fun `Drive never adopts the credential Dropbox stored before keys named an account`() {
+        secrets.put("dropbox.refresh-token", "the-v0.3-refresh-token")
+        assertNull(KeystoreRefreshTokens(secrets, ProviderType.GOOGLE_DRIVE).read(SOURCE))
+        assertEquals("the-v0.3-refresh-token", secrets.get("dropbox.refresh-token"), "and leaves it for Dropbox")
+    }
 
     @Test
     fun `each account keeps its own credential`() {

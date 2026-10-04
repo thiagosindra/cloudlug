@@ -29,6 +29,18 @@ object GoogleOAuth {
     /** Public by design: it is in every authorization URL a user sees. */
     const val ANDROID_CLIENT_ID = "17997718186-fjt7n8oehpagku3dio8rcqt0fbc5ssuh.apps.googleusercontent.com"
 
+    /**
+     * The Android client's redirect: Google's reverse-client-id custom scheme,
+     * claimed by the app's manifest and validated against the pending PKCE
+     * state on the way back (§8.4).
+     *
+     * Google documents custom schemes as unsupported for Android clients; this
+     * one works because the scheme is enabled on the client in the console,
+     * and Google may withdraw that (spec-proposals/v1.6.md §4).
+     */
+    const val ANDROID_REDIRECT_SCHEME = "com.googleusercontent.apps.17997718186-fjt7n8oehpagku3dio8rcqt0fbc5ssuh"
+    const val ANDROID_REDIRECT_URI = "$ANDROID_REDIRECT_SCHEME:/oauth2redirect"
+
     const val AUTHORIZE_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
     const val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
     const val REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"

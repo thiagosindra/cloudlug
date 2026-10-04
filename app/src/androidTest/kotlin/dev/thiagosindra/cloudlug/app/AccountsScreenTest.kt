@@ -32,29 +32,25 @@ class AccountsScreenTest {
     fun the_accounts_screen_is_reachable_and_tells_the_truth_about_each_provider() {
         compose.node("Accounts").performClick()
 
-        // Dropbox is the real adapter as of v0.3 and nothing is connected on a
-        // fresh install, so it must offer a way in rather than pretending.
+        // Both real providers connect as of v0.6, and nothing is connected on
+        // a fresh install, so each must offer its own way in. The buttons are
+        // named per provider, so a screen reader — and this test — can tell
+        // them apart.
         compose.awaitText("Dropbox")
         compose.awaitText("Not connected")
-        compose.awaitText("Connect")
+        compose.awaitText("Connect Dropbox")
+        compose.awaitText("Connect Google Drive")
 
-        // Google Drive has no connector, so no Connect button — better than a
-        // greyed one that invites a press it can never honour, and it leaves
-        // exactly one "Connect" on screen to press.
-        //
-        // In a debug build it does have a row: DemoAccounts seeds one so the
-        // wizard has a destination to offer. Saying "not supported yet" beside
-        // an account the wizard will happily use would be the lie, so what is
-        // asserted here is the demo account, not that sentence.
-        compose.awaitText("Google Drive")
-        compose.awaitText("demo-destination@example.invalid")
-
-        // The demo provider is not something anyone signs in to, so §24.5
-        // leaves it out even though §24.2 offers it in debug.
-        assertTrue(
-            "the demo provider is listed as something you could sign in to",
-            compose.onAllNodesWithText("Demo provider", useUnmergedTree = true).fetchSemanticsNodes().isEmpty(),
-        )
+        // The demo providers are not things anyone signs in to, so §24.5
+        // leaves both out even though §24.2 offers them in debug. Until v0.6
+        // the demo destination sat under Google Drive's row; it has a type of
+        // its own now, so a real Drive row never shows a fake account.
+        listOf("Demo provider", "Demo destination", "demo-destination@example.invalid").forEach { demo ->
+            assertTrue(
+                "$demo is listed as something you could sign in to",
+                compose.onAllNodesWithText(demo, useUnmergedTree = true).fetchSemanticsNodes().isEmpty(),
+            )
+        }
 
         // §8.1's promise, stated where the user decides whether to trust it.
         compose.awaitText("never sees your password")
@@ -75,7 +71,7 @@ class AccountsScreenTest {
         compose.node("Accounts").performClick()
         compose.awaitText("Dropbox")
 
-        compose.node("Connect").performClick()
+        compose.node("Connect Dropbox").performClick()
 
         compose.awaitText("no browser installed")
     }
@@ -97,28 +93,5 @@ class AccountsScreenTest {
         compose.node("Back").performClick()
 
         compose.awaitText("New Transfer")
-    }
-
-    @Test
-    fun disconnecting_an_account_with_no_connector_does_not_crash() {
-        // The demo Drive row has a Disconnect button and no connector behind
-        // it. Looking that connector up with error() threw
-        // IllegalStateException, which §24.5's error handling does not catch,
-        // so the press took the app down.
-        compose.node("Accounts").performClick()
-        compose.awaitText("demo-destination@example.invalid")
-
-        // "Disconnect…" opens the confirmation; "Disconnect" inside it acts.
-        compose.node("Disconnect\u2026").performClick()
-        compose.awaitText("will revoke its access")
-        compose.node("Disconnect").performClick()
-
-        // The row is gone and the app is still here.
-        compose.awaitText("Accounts")
-        assertTrue(
-            "the demo Drive account survived being disconnected",
-            compose.onAllNodesWithText("demo-destination@example.invalid", useUnmergedTree = true)
-                .fetchSemanticsNodes().isEmpty(),
-        )
     }
 }

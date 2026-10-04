@@ -66,4 +66,13 @@ class GoogleOAuthTest {
         assertTrue(GoogleOAuth.rolesFor(GoogleOAuth.parseScopes(null)).canDoNothing)
         assertTrue(GoogleOAuth.rolesFor(GoogleOAuth.parseScopes("openid email")).canDoNothing)
     }
+
+    @Test
+    fun `the redirect scheme is the Android client id reversed, as Google requires`() {
+        // A typo here fails only on a phone, at the consent screen, with an
+        // error that names neither the scheme nor the client.
+        val idPart = GoogleOAuth.ANDROID_CLIENT_ID.removeSuffix(".apps.googleusercontent.com")
+        assertEquals("com.googleusercontent.apps.$idPart", GoogleOAuth.ANDROID_REDIRECT_SCHEME)
+        assertEquals("${GoogleOAuth.ANDROID_REDIRECT_SCHEME}:/oauth2redirect", GoogleOAuth.ANDROID_REDIRECT_URI)
+    }
 }

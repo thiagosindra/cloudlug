@@ -10,6 +10,7 @@ import dev.thiagosindra.cloudlug.model.ProviderType
 import dev.thiagosindra.cloudlug.provider.dropbox.DropboxCloudProvider
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudProvider
 import dev.thiagosindra.cloudlug.provider.fake.FakeCloudStorage
+import dev.thiagosindra.cloudlug.provider.googledrive.GoogleDriveCloudProvider
 import dev.thiagosindra.cloudlug.transfer.pipeline.AvailableProviders
 import dev.thiagosindra.cloudlug.transfer.pipeline.ProviderRegistry
 import javax.inject.Named
@@ -20,10 +21,15 @@ import kotlin.random.Random
  * The two [FakeCloudProvider]s the app still runs on where no real adapter
  * exists yet (§31.3).
  *
- * v0.3 did what the v0.2 comment here promised: `ProviderType.DROPBOX` is now
- * the real adapter in [AuthModule], and nothing above these modules changed —
- * which was the claim being tested. What is left is the demo provider, which
- * needs no OAuth, no network and no account, and Google Drive, which is v0.4.
+ * v0.3 made `ProviderType.DROPBOX` the real adapter and v0.6 did the same for
+ * `GOOGLE_DRIVE`, with nothing above these modules changing — which was the
+ * claim being tested. What is left are the two demo providers, which need no
+ * OAuth, no network and no account.
+ *
+ * The demo destination was registered as `GOOGLE_DRIVE` until v0.6. The
+ * registry is keyed by provider type, so once a real Drive account can be
+ * connected that would have sent its transfers into this in-memory fake, and
+ * reported them complete. It is [ProviderType.FAKE_DESTINATION] now.
  *
  * The demo provider is offered in debug builds only. It exercises the engine's
  * entire public surface — enumeration, manifest review, chunked transfer,
@@ -33,8 +39,8 @@ import kotlin.random.Random
  * Each is configured to behave like a real provider rather than like an ideal
  * one, so the capability-driven paths of §19.3 and §20.3 are genuinely
  * exercised: the demo source uses a block hash, folds case and forbids
- * duplicate siblings; the Drive stand-in uses SHA-256, is case-sensitive and
- * allows them.
+ * duplicate siblings; the demo destination uses SHA-256, is case-sensitive and
+ * allows them, as Drive does.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -70,12 +76,12 @@ object DemoProvidersModule {
             allowsDuplicateSiblingNames = true,
             uploadChunkAlignment = 256L * 1024,
         )
-        val storage = FakeCloudStorage(ProviderType.GOOGLE_DRIVE, capabilities.nativeHashAlgorithm)
+        val storage = FakeCloudStorage(ProviderType.FAKE_DESTINATION, capabilities.nativeHashAlgorithm)
         // Somewhere for the user to pick in wizard step 4.
         storage.folder("My Drive")
         storage.folder("Backups")
         return FakeCloudProvider(
-            type = ProviderType.GOOGLE_DRIVE,
+            type = ProviderType.FAKE_DESTINATION,
             capabilities = capabilities,
             storage = storage,
         )
@@ -85,13 +91,15 @@ object DemoProvidersModule {
     @Singleton
     fun providerRegistry(
         dropbox: DropboxCloudProvider,
+        drive: GoogleDriveCloudProvider,
         @Named("demo") demo: FakeCloudProvider,
         @Named("destination") destination: FakeCloudProvider,
     ): ProviderRegistry = ProviderRegistry { type ->
         when (type) {
             ProviderType.DROPBOX -> dropbox
-            ProviderType.GOOGLE_DRIVE -> destination
+            ProviderType.GOOGLE_DRIVE -> drive
             ProviderType.FAKE -> demo
+            ProviderType.FAKE_DESTINATION -> destination
         }
     }
 
@@ -107,7 +115,10 @@ object DemoProvidersModule {
         buildList {
             add(ProviderType.DROPBOX)
             add(ProviderType.GOOGLE_DRIVE)
-            if (BuildConfig.DEBUG) add(ProviderType.FAKE)
+            if (BuildConfig.DEBUG) {
+                add(ProviderType.FAKE)
+                add(ProviderType.FAKE_DESTINATION)
+            }
         },
     )
 
