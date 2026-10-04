@@ -30,8 +30,10 @@ execution and Google Drive moves to v0.6. Spec §33's table is amended in
 `drive-capture`, with `GoogleOAuth` shared with the app. The first capture run
 found a defect in the capture tool itself: it published a `session_crd` URL
 parameter, because redaction knew only `upload_id` by name. Redaction of URL
-parameters is now deny-by-default (a PR of its own). The leaked value is only
-on an unmerged branch, and that capture is to be redone.
+parameters is now deny-by-default (a PR of its own). The leaked value was only
+ever on an unmerged branch, and nothing on `main` contains it. That branch was
+rewritten, and the capture redone with the fix on 2026-10-04. The fixtures in
+this repository come from the second run.
 
 **Step 2: the adapter.** `GoogleDriveCloudProvider` over `:core:network`:
 - **Discovery:** `rootOf`, `listChildren` with paging, `lookupDestination`
