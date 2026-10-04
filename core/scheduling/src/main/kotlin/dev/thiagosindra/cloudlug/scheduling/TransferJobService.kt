@@ -30,14 +30,21 @@ class TransferJobService : JobService() {
         work = scope.launch {
             runner.run(id, this) { notification ->
                 // Mandatory for a user-initiated job, and the same call is how
-                // progress is updated. DETACH so a finished transfer's last
-                // notification survives the job ending rather than vanishing
-                // at the moment it has something to say.
+                // progress is updated.
+                //
+                // REMOVE, not DETACH. While the job runs, the platform owns
+                // this notification and ignores the app's own cancel(), so
+                // the runner's "take it down" at the end did nothing; DETACH
+                // then left the last progress update behind, ongoing, with
+                // Pause and Cancel, on a transfer that had completed — seen on
+                // the first real Dropbox → Drive run. Whatever must outlive
+                // the job (a §24.4 waiting state) is posted under its own id
+                // by TransferNotifications.publishParked.
                 setNotification(
                     params,
                     notifications.notificationId(id),
                     notification,
-                    JOB_END_NOTIFICATION_POLICY_DETACH,
+                    JOB_END_NOTIFICATION_POLICY_REMOVE,
                 )
             }
             jobFinished(params, false)
