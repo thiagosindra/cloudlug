@@ -77,6 +77,15 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
 ### Real Drive, recordings only, or nothing yet
 
 **Run against real Google Drive:**
+- **the §36 hash check, all five cases** (reported 2026-10-04). One byte,
+  exactly 256 KiB, exactly 8 MiB, ~10 MiB (a whole chunk, a checkpoint and
+  restore of the hash, then an unaligned final chunk), and a local file of the
+  maintainer's. Each went up as a resumable session in 8 MiB chunks with no
+  `PROTOCOL` problem. `md5Checksum` and `sha256Checksum` matched
+  `:core:hashing` in every case, both in the response that finished the upload
+  (§21 step 1) and from a later `files.get` (§21 step 2). So Drive reports
+  SHA-256 in both places, and v1.6 §6's second-hash comparison has a real
+  value to compare against;
 - the Desktop client's authorize URL;
 - the capture run: every route the adapter uses, plus 404, 400, 401,
   `invalid_grant` and the cancelled-session `499`;
@@ -90,8 +99,6 @@ granted scopes, so a self-build with `drive.readonly` sees neither line.
   destination hash (`DriveDestinationHandoffTest`).
 
 **Not yet run:**
-- **The §36 hash-check output** for 1 B, 256 KiB, 8 MiB, ~10 MiB and a local
-  file. Only the two captured uploads above have been compared.
 - **The live contract suite.** Its 23 tests skip without
   `DRIVE_REFRESH_TOKEN`.
 - **Sign-in on a phone**: the Custom Tab, the custom-scheme redirect, and
@@ -678,10 +685,9 @@ file counts.
 
 The code is complete. What is left needs your account, your phone, or both.
 
-1. **The §36 hash-check output.** Run `validateDriveHashes`, locally or from
-   the Actions tab. So far only the two captured uploads have been compared
-   with real Drive checksums. The 8 MiB and ~10 MiB cases, the restore across
-   a chunk boundary, and a file of your own have not.
+1. ~~**The §36 hash-check output.**~~ Done: all five cases matched on MD5
+   and SHA-256, in both places Drive reports them. See "Run against real
+   Google Drive" above.
 2. **The live contract suite**, from **Drive live contract tests** in the
    Actions tab. Nothing has run it against real Drive. While the OAuth app is
    in Testing status, the refresh token behind it expires every seven days.
