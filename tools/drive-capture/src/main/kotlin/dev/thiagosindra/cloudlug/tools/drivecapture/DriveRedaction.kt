@@ -37,6 +37,16 @@ package dev.thiagosindra.cloudlug.tools.drivecapture
  * verification asserts against. Names are ours: the capture tool creates
  * everything it records.
  *
+ * ### URL query parameters are denied by default
+ *
+ * A session URI is more than its `upload_id`: Drive has also returned a
+ * `session_crd` parameter, an opaque per-session value nobody predicted, and
+ * the first capture published it because only `upload_id` was named here.
+ * So every query parameter in every URL is pseudonymized in place unless its
+ * name is in [STRUCTURAL_PARAMETERS] — parameters CloudLug itself sends, whose
+ * values are fixed strings rather than state. A parameter Google adds
+ * tomorrow is redacted, not published.
+ *
  * ### The failure mode is refusal
  *
  * [leaks] lists every real value that survived redaction, and any email
@@ -49,8 +59,11 @@ class DriveRedaction {
     private val ids = LinkedHashMap<String, String>()
     private val personal = LinkedHashMap<String, String>()
 
+    /** Query values too short to replace globally; replaced only where they sit in a URL. */
+    private val shortQueryValues = LinkedHashMap<String, String>()
+
     /** How many distinct values were replaced, for the run's summary. */
-    val replacements: Int get() = ids.size + personal.size
+    val replacements: Int get() = ids.size + personal.size + shortQueryValues.size
 
     /** Registers an opaque value that must never reach a fixture. */
     fun register(real: String) {
@@ -62,7 +75,9 @@ class DriveRedaction {
     fun harvest(text: String) {
         ID_FIELD.findAll(text).forEach { register(it.groupValues[2]) }
         PARENTS.findAll(text).forEach { match -> QUOTED.findAll(match.groupValues[1]).forEach { register(it.groupValues[1]) } }
-        UPLOAD_ID.findAll(text).forEach { register(it.groupValues[1]) }
+        QUERY_PARAMETER.findAll(text)
+            .filter { it.groupValues[2] !in STRUCTURAL_PARAMETERS && it.groupValues[3].isNotEmpty() }
+            .forEach { register(it.groupValues[3]) }
         PERSONAL_FIELD.findAll(text).forEach { match ->
             val value = match.groupValues[3]
             if (value.isNotEmpty()) personal[value] = PERSONAL_REPLACEMENTS.getValue(match.groupValues[1])
@@ -72,6 +87,14 @@ class DriveRedaction {
     fun redact(text: String): String {
         var out = PERSONAL_FIELD.replace(text) { match ->
             "\"${match.groupValues[1]}\"${match.groupValues[2]}\"${PERSONAL_REPLACEMENTS.getValue(match.groupValues[1])}\""
+        }
+        out = QUERY_PARAMETER.replace(out) { match ->
+            val (_, separator, name, value) = match.groupValues
+            if (name in STRUCTURAL_PARAMETERS || value.isEmpty()) {
+                match.value
+            } else {
+                "$separator$name=" + (ids[value] ?: shortQueryValues.getOrPut(value) { sameShape(value, ids.size + shortQueryValues.size + 1) })
+            }
         }
         // Longest first, so an id that happens to contain a shorter one is
         // replaced whole rather than partially rewritten.
@@ -86,7 +109,14 @@ class DriveRedaction {
             SAFE_EMAIL_DOMAINS.any { email.endsWith("@$it") }
         }.map { "an email address" }
         val credentials = CREDENTIAL.findAll(text).map { "something shaped like a Google token" }
-        return survived + emails + credentials
+        val parameters = QUERY_PARAMETER.findAll(text)
+            .filter { it.groupValues[2] !in STRUCTURAL_PARAMETERS && it.groupValues[3].isNotEmpty() }
+            // Only a value this run produced counts as redacted. Matching on
+            // the stem instead would wave through a real value that happens
+            // to look like one.
+            .filterNot { it.groupValues[3] in ids.values || it.groupValues[3] in shortQueryValues.values }
+            .map { "an unredacted URL parameter '${it.groupValues[2]}'" }
+        return survived + emails + credentials + parameters
     }
 
     /**
@@ -95,7 +125,7 @@ class DriveRedaction {
      * differ in length from what Drive sent is no longer a record of it.
      */
     private fun sameShape(real: String, ordinal: Int): String {
-        val stem = "FIXTURE%04d".format(ordinal)
+        val stem = "$PSEUDONYM_STEM%04d".format(ordinal)
         return if (stem.length >= real.length) stem.takeLast(real.length) else stem.padEnd(real.length, 'x')
     }
 
@@ -106,7 +136,16 @@ class DriveRedaction {
         val ID_FIELD = Regex("\"(id|permissionId|nextPageToken|driveId)\"\\s*:\\s*\"([^\"]+)\"")
         val PARENTS = Regex("\"parents\"\\s*:\\s*\\[([^\\]]*)]")
         val QUOTED = Regex("\"([^\"]+)\"")
-        val UPLOAD_ID = Regex("[?&]upload_id=([A-Za-z0-9_.-]+)")
+        const val PSEUDONYM_STEM = "FIXTURE"
+
+        /** `?name=value` or `&name=value` inside any URL, in a body or a header. */
+        val QUERY_PARAMETER = Regex("([?&])([A-Za-z0-9_.-]+)=([^&\"\\s#]*)")
+
+        /**
+         * Parameters CloudLug sends itself, with fixed values. Everything else
+         * in a URL Drive hands back is treated as state.
+         */
+        val STRUCTURAL_PARAMETERS = setOf("uploadType", "fields", "alt", "supportsAllDrives", "spaces", "pageSize")
         val PERSONAL_FIELD = Regex("\"(emailAddress|displayName|photoLink)\"(\\s*:\\s*)\"([^\"]*)\"")
         val PERSONAL_REPLACEMENTS = mapOf(
             "emailAddress" to "scratch@example.com",
