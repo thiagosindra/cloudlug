@@ -131,6 +131,13 @@ enum class ItemStatusReason {
     /** Only size could be confirmed; provider declares no server hash (spec §21 step 4). */
     VERIFIED_BY_SIZE_ONLY,
 
+    /**
+     * A folder, created at the destination (spec §20.5). It has no bytes, so
+     * nothing was verified, and a folder row reading "verified by destination
+     * hash" claimed a check that never ran.
+     */
+    CREATED_AT_DESTINATION,
+
     /** Retry budget exhausted or a permanent provider error (spec §23). */
     ERROR_PERMANENT,
 

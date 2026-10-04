@@ -60,6 +60,13 @@ interface ChunkStore {
 
     suspend fun read(transferId: TransferId, itemId: TransferItemId, fileName: String): ByteArray
 
+    /**
+     * Where a chunk [write] returned lives, so an upload can stream it from
+     * disk rather than hold it in memory (§14). Callers must not assume the
+     * file still exists once the chunk has been released.
+     */
+    fun pathOf(transferId: TransferId, itemId: TransferItemId, fileName: String): Path
+
     suspend fun delete(transferId: TransferId, itemId: TransferItemId, fileName: String)
 
     suspend fun deleteItem(transferId: TransferId, itemId: TransferItemId)
@@ -106,6 +113,9 @@ class FileSystemChunkStore(private val root: Path) : ChunkStore {
         if (!file.exists()) throw IOException("Cached chunk $fileName is missing")
         return Files.readAllBytes(file)
     }
+
+    override fun pathOf(transferId: TransferId, itemId: TransferItemId, fileName: String): Path =
+        ChunkCacheLayout.itemDirectory(root, transferId, itemId).resolve(fileName)
 
     override suspend fun delete(transferId: TransferId, itemId: TransferItemId, fileName: String) {
         ChunkCacheLayout.itemDirectory(root, transferId, itemId).resolve(fileName).deleteIfExists()

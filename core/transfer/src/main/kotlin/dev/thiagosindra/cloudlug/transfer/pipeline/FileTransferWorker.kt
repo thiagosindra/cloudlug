@@ -31,6 +31,8 @@ import dev.thiagosindra.cloudlug.transfer.policy.DestinationVerifier
 import dev.thiagosindra.cloudlug.transfer.policy.NetworkPolicyGate
 import dev.thiagosindra.cloudlug.transfer.policy.VerificationResult
 import dev.thiagosindra.cloudlug.model.TransferStatus
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.time.Clock
 import java.util.UUID
 
@@ -133,7 +135,7 @@ class FileTransferWorker(
         return repository.transitionItem(
             item.id,
             TransferItemStatus.COMPLETED,
-            ItemStatusReason.VERIFIED_BY_DESTINATION_HASH,
+            ItemStatusReason.CREATED_AT_DESTINATION,
         )
     }
 
@@ -380,11 +382,14 @@ class FileTransferWorker(
 
         var offset = 0L
         var index = 0L
+        // One buffer for the whole file. It is filled from the source, hashed
+        // and written to the cache; the upload then streams the cache file, so
+        // a chunk costs this buffer and nothing else (v0.6.1).
+        val buffer = ByteArray(chunkSize)
         download.use {
             while (true) {
                 awaitCacheRoom(transfer, chunkSize.toLong())
 
-                val buffer = ByteArray(chunkSize)
                 val read = readFully(download, buffer)
                 if (read <= 0) break
 
@@ -395,7 +400,13 @@ class FileTransferWorker(
 
                 val expectedSize = item.size
                 val isFinal = expectedSize != null && offset >= expectedSize
-                acknowledged = uploadChunk(item, destination, session, chunk, buffer, read, isFinal)
+                val content = Chunk.fromFile(
+                    offset = chunk.offset,
+                    file = chunkStore.pathOf(transfer.id, item.id, chunk.localFilename),
+                    length = read,
+                    isFinal = isFinal,
+                )
+                acknowledged = uploadChunk(item, destination, session, chunk, content)
                 releaseAcknowledged(transfer, item, acknowledged)
                 index++
             }
@@ -409,9 +420,7 @@ class FileTransferWorker(
                 destination = destination,
                 session = session,
                 chunk = null,
-                buffer = ByteArray(0),
-                length = 0,
-                isFinal = true,
+                content = Chunk(offset = 0L, bytes = ByteArray(0), isFinal = true),
             )
         }
 
@@ -483,17 +492,10 @@ class FileTransferWorker(
         destination: CloudProvider,
         session: UploadSession,
         chunk: CacheChunkEntity?,
-        buffer: ByteArray,
-        length: Int,
-        isFinal: Boolean,
+        content: Chunk,
     ): Long {
         chunk?.let { transitionChunk(it, CacheChunkStatus.UPLOADING) }
-        val progress = retries.execute(item.id, "uploadChunk") {
-            destination.uploadChunk(
-                session,
-                Chunk(offset = chunk?.offset ?: 0L, bytes = buffer, length = length, isFinal = isFinal),
-            )
-        }
+        val progress = retries.execute(item.id, "uploadChunk") { destination.uploadChunk(session, content) }
         repository.recordUploadProgress(item.id, progress.acknowledgedBytes)
         return progress.acknowledgedBytes
     }
@@ -562,6 +564,10 @@ class FileTransferWorker(
     private suspend fun readFully(download: CloudDownload, buffer: ByteArray): Int {
         var filled = 0
         while (filled < buffer.size) {
+            // A source read blocks a thread rather than suspending, so without
+            // this a cancelled run reads, hashes, caches and uploads one more
+            // whole chunk before it notices (see TransferController.run).
+            currentCoroutineContext().ensureActive()
             val read = download.read(buffer, filled, buffer.size - filled)
             if (read < 0) break
             filled += read

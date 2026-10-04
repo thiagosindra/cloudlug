@@ -283,7 +283,7 @@ class FakeCloudProvider(
                 code = "incorrect_offset",
             )
         }
-        val bytes = corruptIfInjected(chunk.bytes.copyOfRange(0, chunk.length))
+        val bytes = corruptIfInjected(chunk.readBytes())
         pending.buffer.write(bytes)
         pending.received += chunk.length
         return UploadProgress(pending.received.toLong(), complete = chunk.isFinal)

@@ -31,9 +31,10 @@ object SchedulingModule {
         @ApplicationContext context: Context,
         work: WorkManager,
         repository: TransferRepository,
+        notifications: TransferNotifications,
     ): TransferScheduler = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
         // §17: UIDT above the dataSync cap, WorkManager below it.
-        UidtTransferScheduler(context, repository)
+        UidtTransferScheduler(context, repository, notifications)
     } else {
         WorkManagerTransferScheduler(work, repository)
     }

@@ -11,6 +11,10 @@ import dev.thiagosindra.cloudlug.transfer.manifest.ManifestSummary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -40,6 +44,17 @@ class TransferController(
 
     private val jobs = mutableMapOf<TransferId, Job>()
     private val lock = Mutex()
+    private val owned = MutableStateFlow<Set<TransferId>>(emptySet())
+
+    /**
+     * The transfers a worker in this process is running right now.
+     *
+     * A row that says RUNNING is not this: after process death the row is
+     * still RUNNING and nothing is, and §24.3 should say "interrupted" until a
+     * worker picks it up. Callers must not assume a transfer absent here has
+     * stopped for good, only that nothing in this process is moving it.
+     */
+    val running: StateFlow<Set<TransferId>> = owned.asStateFlow()
 
     fun observeTransfers(): Flow<List<TransferEntity>> = repository.observeTransfers()
 
@@ -59,14 +74,25 @@ class TransferController(
      */
     suspend fun start(id: TransferId) {
         lock.withLock {
-            if (jobs[id]?.isActive == true) return
-            jobs[id] = scope.launch {
+            val previous = jobs[id]
+            if (previous?.isActive == true) return
+            val launched = scope.launch {
                 try {
+                    // A cancelled predecessor may still be inside blocking I/O;
+                    // see [run].
+                    previous?.join()
+                    owned.update { it + id }
                     engine.run(id)
                 } finally {
-                    lock.withLock { jobs.remove(id) }
+                    lock.withLock {
+                        if (jobs[id] === coroutineContext[Job]) {
+                            jobs.remove(id)
+                            owned.update { it - id }
+                        }
+                    }
                 }
             }
+            jobs[id] = launched
         }
     }
 
@@ -84,20 +110,39 @@ class TransferController(
      */
     suspend fun run(id: TransferId): TransferStatus {
         val mine = coroutineContext[Job] ?: error("run() needs a cancellable coroutine")
-        val alreadyRunning = lock.withLock {
-            if (jobs[id]?.isActive == true) true else { jobs[id] = mine; false }
-        }
-        // Not an error and not a second run: the database is authoritative
-        // (§2.4), so the honest answer is whatever the transfer is doing now.
-        if (alreadyRunning) return repository.findTransfer(id)?.status ?: error("No transfer $id")
+        while (true) {
+            val previous = lock.withLock {
+                val holder = jobs[id]?.takeUnless { it.isCompleted }
+                if (holder == null) jobs[id] = mine
+                holder
+            } ?: break
+            // Not an error and not a second run: the database is authoritative
+            // (§2.4), so the honest answer is whatever the transfer is doing now.
+            if (previous.isActive) return repository.findTransfer(id)?.status ?: error("No transfer $id")
 
+            // Cancelled, but not finished. Cancellation does not interrupt a
+            // thread blocked in a socket read or an OkHttp call, so a run that
+            // has been told to stop keeps its chunk buffer, request body and
+            // download stream until it reaches a suspension point. Starting
+            // beside it put two pipelines' memory on one heap: on API 34+
+            // every app launch reschedules a running job, and the platform
+            // stops the old one to start the new (the 2.5 GB OOM, v0.6.1).
+            previous.join()
+        }
+
+        owned.update { it + id }
         return try {
             engine.run(id)
         } finally {
-            // Only if it is still ours: a pause between here and there replaces
-            // the entry, and removing someone else's would leave that runner
-            // unguarded.
-            lock.withLock { if (jobs[id] === mine) jobs.remove(id) }
+            // Only if it is still ours: a runner registers only once the one
+            // before it has finished, so an entry that is not ours belongs to
+            // a later runner, and removing it would leave that one unguarded.
+            lock.withLock {
+                if (jobs[id] === mine) {
+                    jobs.remove(id)
+                    owned.update { it - id }
+                }
+            }
         }
     }
 
@@ -106,7 +151,9 @@ class TransferController(
      * persisted everything it needs, so the transfer resumes from the database.
      */
     suspend fun pause(id: TransferId): TransferStatus {
-        lock.withLock { jobs.remove(id) }?.cancel()
+        // Cancelled but left in the map: the runner removes itself once it has
+        // actually stopped, and until then the next one waits for it (see [run]).
+        lock.withLock { jobs[id] }?.cancel()
         return engine.pause(id)
     }
 
@@ -114,7 +161,7 @@ class TransferController(
 
     /** Spec §22.3. */
     suspend fun cancel(id: TransferId): TransferStatus {
-        lock.withLock { jobs.remove(id) }?.cancel()
+        lock.withLock { jobs[id] }?.cancel()
         return engine.cancelTransfer(id)
     }
 

@@ -78,7 +78,7 @@ fun TransferDetailScreen(
                     bytesAreLowerBound = transfer.bytesAreLowerBound(),
                 )
                 Text(
-                    transfer.summaryLine(),
+                    transfer.summaryLine(owned = state.owned, heldBecause = state.heldBecause),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),

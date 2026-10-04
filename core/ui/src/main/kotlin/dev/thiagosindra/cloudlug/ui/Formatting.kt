@@ -69,6 +69,22 @@ fun TransferEntity.summaryLine(): String = when (status) {
     TransferStatus.DRAFT -> "Draft"
 }
 
+/**
+ * §24.3's status line, which knows one thing the row does not: whether a
+ * worker actually owns the transfer.
+ *
+ * A row says RUNNING from the moment a run starts until it settles, and a
+ * process that dies in between — an `OutOfMemoryError`, a force-stop — leaves
+ * it saying so with nothing running. "Running" is then false. [owned] is
+ * whether a worker in this process is moving it; [heldBecause] is why the
+ * platform is holding its job, when it says.
+ */
+fun TransferEntity.summaryLine(owned: Boolean, heldBecause: String? = null): String = when {
+    status != TransferStatus.RUNNING || owned -> summaryLine()
+    heldBecause != null -> "Interrupted — $heldBecause"
+    else -> "Interrupted — resuming"
+}
+
 fun providerLabel(type: dev.thiagosindra.cloudlug.model.ProviderType): String = when (type) {
     dev.thiagosindra.cloudlug.model.ProviderType.DROPBOX -> "Dropbox"
     dev.thiagosindra.cloudlug.model.ProviderType.GOOGLE_DRIVE -> "Google Drive"

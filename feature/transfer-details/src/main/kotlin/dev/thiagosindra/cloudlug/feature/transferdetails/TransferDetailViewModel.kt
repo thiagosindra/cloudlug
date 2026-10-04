@@ -15,18 +15,28 @@ import dev.thiagosindra.cloudlug.model.TransferStatus
 import dev.thiagosindra.cloudlug.scheduling.TransferScheduler
 import dev.thiagosindra.cloudlug.transfer.TransferController
 import dev.thiagosindra.cloudlug.ui.TransferStage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.seconds
 
 data class DetailState(
     val transfer: TransferEntity? = null,
     val items: List<TransferItemEntity> = emptyList(),
     /** For §24.3's title, which names both ends by account at one provider. */
     val accountNames: Map<AccountId, String> = emptyMap(),
+    /**
+     * Whether a worker in this process owns the transfer. Defaults to true so
+     * a state built before the first answer does not flash "interrupted".
+     */
+    val owned: Boolean = true,
+    /** Why the platform is holding the transfer's job, when it says. */
+    val heldBecause: String? = null,
 ) {
     /** The item currently moving bytes, which §24.3 shows as CURRENT FILE. */
     val currentItem: TransferItemEntity?
@@ -66,18 +76,34 @@ class TransferDetailViewModel @Inject constructor(
 
     private val transferId = TransferId(checkNotNull(savedStateHandle["transferId"]))
 
+    /**
+     * The platform's reason for holding the job, asked again every few seconds:
+     * JobScheduler offers no callback for it, and the answer changes when a
+     * battery saver turns off without anything in the app noticing.
+     */
+    private val heldBecause = flow {
+        while (true) {
+            emit(scheduler.holdReason(transferId))
+            delay(HOLD_POLL)
+        }
+    }
+
     val state: StateFlow<DetailState> =
         combine(
             controller.observeTransfer(transferId),
             controller.observeItems(transferId),
             accounts.observe(),
-        ) { transfer, items, connected ->
+            controller.running,
+            heldBecause,
+        ) { transfer, items, connected, running, held ->
             DetailState(
                 transfer = transfer,
                 items = items,
                 accountNames = connected.mapNotNull { account ->
                     (account.displayEmail ?: account.displayName)?.let { account.id to it }
                 }.toMap(),
+                owned = transferId in running,
+                heldBecause = held,
             )
         }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DetailState())
@@ -107,5 +133,9 @@ class TransferDetailViewModel @Inject constructor(
     fun retryIncomplete() = viewModelScope.launch {
         controller.retryIncomplete(transferId)
         scheduler.enqueue(transferId)
+    }
+
+    private companion object {
+        val HOLD_POLL = 5.seconds
     }
 }

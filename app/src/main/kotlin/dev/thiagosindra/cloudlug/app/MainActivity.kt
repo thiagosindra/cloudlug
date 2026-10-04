@@ -13,12 +13,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
 import dev.thiagosindra.cloudlug.BuildConfig
 import dev.thiagosindra.cloudlug.app.di.DemoAccounts
@@ -77,7 +79,12 @@ class MainActivity : ComponentActivity() {
         // also covers the one case a boot receiver cannot: a user-initiated job
         // may only be scheduled while the app is visible, so a transfer that
         // survived a reboot without its job is picked up here.
-        lifecycleScope.launch { scheduler.reconcile() }
+        //
+        // On STARTED, not in onCreate: STARTED is visible, which is what that
+        // rule asks for, and it recurs, so coming back to the app after a crash
+        // left a transfer RUNNING with no worker picks it up. Repeating it is
+        // safe because reconcile never replaces a job the platform is running.
+        lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { scheduler.reconcile() } }
 
         // §24.4's notification is mandatory for a user-initiated job on 34+, so
         // asking is not optional either. Asked on first launch rather than at

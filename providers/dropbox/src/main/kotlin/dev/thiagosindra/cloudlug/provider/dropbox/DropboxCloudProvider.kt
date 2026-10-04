@@ -4,6 +4,7 @@ import dev.thiagosindra.cloudlug.model.AccountId
 import dev.thiagosindra.cloudlug.model.CloudObjectType
 import dev.thiagosindra.cloudlug.model.CloudPath
 import dev.thiagosindra.cloudlug.model.ProviderType
+import dev.thiagosindra.cloudlug.network.StreamingRequestBody
 import dev.thiagosindra.cloudlug.provider.CloudAccount
 import dev.thiagosindra.cloudlug.provider.CloudDownload
 import dev.thiagosindra.cloudlug.provider.CloudErrorKind
@@ -312,7 +313,8 @@ api.rpcWithoutArgument(account, "/2/auth/token/revoke")
                 put("cursor", cursorFor(session, chunk.offset))
                 put("close", false)
             },
-            payload = chunk.bytes.toRequestBody(null, 0, chunk.length),
+            // Streamed from the chunk's cache file: one buffer per chunk, not two.
+            payload = StreamingRequestBody(chunk.length.toLong(), open = chunk::openStream),
         ).close()
 
         acknowledged[session.id] = chunk.endExclusive

@@ -63,10 +63,11 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
         transfer: TransferEntity,
         current: TransferItemEntity?,
         accountNames: Map<dev.thiagosindra.cloudlug.model.AccountId, String> = emptyMap(),
+        because: String? = null,
     ): Notification {
         val builder = Notification.Builder(context, CHANNEL)
             .setContentTitle(transfer.directionLabel(accountNames))
-            .setContentText(line(transfer, current))
+            .setContentText(because ?: line(transfer, current))
             .setSmallIcon(android.R.drawable.stat_sys_upload)
             .setOnlyAlertOnce(true)
             .setOngoing(!transfer.status.isTerminal)
@@ -131,6 +132,20 @@ class TransferNotifications @Inject constructor(@param:ApplicationContext privat
         // kept for the WorkManager path, where it is the app's again once the
         // worker's foreground service has stopped.
         manager.cancel(notificationId(transfer.id))
+    }
+
+    /**
+     * §24.4's "say why" for a job the platform is holding rather than running —
+     * a battery saver, the phone's state, a background limit — when the row
+     * cannot say it, because the row still reads RUNNING or READY.
+     *
+     * Posted under the waiting-state id, so the run that eventually starts
+     * clears it like any other waiting notification.
+     */
+    fun publishHeld(transfer: TransferEntity, because: String) {
+        ensureChannel()
+        context.getSystemService(NotificationManager::class.java)
+            .notify(parkedNotificationId(transfer.id), build(transfer, null, because = because.replaceFirstChar(Char::uppercase)))
     }
 
     /** A transfer that runs again is no longer waiting, and the job's notification says so. */
